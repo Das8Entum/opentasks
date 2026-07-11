@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TASKS</title>
+<style>
+  :root{
+    --bg:#0a0a0c;
+    --panel:#0f0f11;
+    --panel-2:#141416;
+    --line:#26272b;
+    --line-soft:#1a1b1e;
+    --txt:#e6e6e3;
+    --txt-body:#cfcfca;
+    --txt-dim:#77787d;
+    --txt-faint:#4f5055;
+    --accent:#dca23f;
+    --accent-soft:#7d6230;
+    --accent-tint:rgba(220,162,63,.10);
+    --grey:#c7c6c0;
+    --font:"SF Mono","JetBrains Mono","Cascadia Code","Cascadia Mono",Consolas,"Roboto Mono",ui-monospace,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    background:var(--bg);color:var(--txt-body);font-family:var(--font);
+    font-size:13px;line-height:1.5;-webkit-font-smoothing:antialiased;
+    display:flex;flex-direction:column;height:100vh;overflow:hidden;letter-spacing:.2px;
+  }
+  ::selection{background:var(--accent-soft);color:#fff}
+  button{font-family:inherit;font-size:inherit;color:inherit;background:none;border:none;cursor:pointer}
+  input,textarea{font-family:inherit;font-size:inherit;color:var(--txt-body);background:none;border:none;outline:none;resize:none}
+
+  .k{color:var(--txt-dim);text-transform:uppercase;letter-spacing:1px;font-size:11px}
+  .v{color:var(--txt)}
+  .v.am{color:var(--accent)}
+  .sep{color:var(--txt-faint);margin:0 3px}
+
+  .topbar{display:flex;align-items:center;gap:18px;padding:9px 16px;border-bottom:1px solid var(--line);background:var(--bg);flex-shrink:0}
+  .brand{font-weight:700;letter-spacing:2px;font-size:12px;color:var(--txt);text-transform:uppercase}
+  .brand b{color:var(--accent);font-weight:700;margin-right:3px}
+  .stats{font-size:11px;display:flex;align-items:center;white-space:nowrap}
+  .search{flex:1;max-width:380px;display:flex;align-items:center;gap:8px;background:var(--panel-2);border:1px solid var(--line);border-radius:3px;padding:5px 10px;margin-left:8px}
+  .search input{width:100%;font-size:12px;letter-spacing:.5px}
+  .search input::placeholder{color:var(--txt-faint);text-transform:uppercase;letter-spacing:1px;font-size:10px}
+  .search svg{flex-shrink:0;color:var(--txt-faint)}
+  .top-actions{margin-left:auto;display:flex;gap:4px}
+  .top-actions button{color:var(--txt-dim);padding:5px 10px;border-radius:3px;font-size:10px;text-transform:uppercase;letter-spacing:1px;border:1px solid var(--line);transition:.13s}
+  .top-actions button:hover{color:var(--accent);border-color:var(--accent-soft)}
+  #cloudBtn.ok{color:var(--accent);border-color:var(--accent-soft)}
+  #cloudBtn.busy{color:var(--txt);border-color:var(--line)}
+  #cloudBtn.warn,#cloudBtn.err{color:#c86a5a;border-color:#5a3230}
+
+  .main{display:flex;flex:1;min-height:0}
+  .sidebar{width:238px;flex-shrink:0;border-right:1px solid var(--line);background:var(--bg);display:flex;flex-direction:column}
+  .panel-head{display:flex;align-items:center;justify-content:space-between;padding:11px 15px 9px;border-bottom:1px solid var(--line-soft)}
+  .panel-head .label{font-size:11px;text-transform:uppercase;letter-spacing:2px;color:var(--txt);font-weight:700}
+  .panel-head .add{color:var(--txt-dim);font-size:15px;line-height:1;padding:0 3px;transition:.13s}
+  .panel-head .add:hover{color:var(--accent)}
+  .projects{overflow-y:auto;flex:1;padding:6px 8px 12px}
+  .proj{display:flex;align-items:center;gap:9px;padding:7px 9px;border-radius:3px;cursor:pointer;color:var(--txt-dim);transition:.1s;position:relative;border:1px solid transparent}
+  .proj:hover{background:var(--panel-2);color:var(--txt-body)}
+  .proj.active{background:var(--panel-2);color:var(--txt);border-color:var(--line)}
+  .proj.active::before{content:"";position:absolute;left:-1px;top:5px;bottom:5px;width:2px;background:var(--accent)}
+  .proj .idx{font-size:10px;color:var(--txt-faint);width:22px;flex-shrink:0;letter-spacing:.5px}
+  .proj.active .idx{color:var(--accent)}
+  .proj .name{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12.5px;letter-spacing:.3px}
+  .proj .count{font-size:10px;color:var(--txt-dim);min-width:20px;text-align:right;letter-spacing:.5px}
+  .proj .x{opacity:0;color:var(--txt-faint);font-size:14px;transition:.1s;padding-left:4px}
+  .proj:hover .x{opacity:1}
+  .proj .x:hover{color:#c86a5a}
+
+  .content{flex:1;display:flex;flex-direction:column;min-width:0;background:var(--bg)}
+  .content-head{padding:12px 24px;border-bottom:1px solid var(--line-soft);display:flex;align-items:baseline;justify-content:space-between;gap:16px;flex-shrink:0}
+  .content-title{font-size:15px;font-weight:700;text-transform:uppercase;letter-spacing:2px;color:var(--txt);display:flex;align-items:center;gap:10px;cursor:pointer;min-width:0}
+  .content-title .t{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .content-title .edit{color:var(--txt-faint);font-size:10px;letter-spacing:1px;opacity:0;transition:.15s;flex-shrink:0}
+  .content-title:hover .edit{opacity:1}
+  .content-sub{font-size:11px;white-space:nowrap;flex-shrink:0}
+
+  .cats{display:flex;flex-wrap:wrap;gap:6px;padding:14px 24px 2px}
+  .chip{padding:5px 11px;border-radius:3px;border:1px solid var(--line);color:var(--txt-dim);font-size:11px;text-transform:uppercase;letter-spacing:1px;transition:.1s;display:flex;align-items:center;gap:7px}
+  .chip:hover{border-color:var(--accent-soft);color:var(--txt-body)}
+  .chip.active{border-color:var(--accent);color:var(--accent);background:var(--accent-tint)}
+  .chip .c{font-size:10px;opacity:.65}
+  .chip.add{color:var(--txt-faint);border-style:dashed}
+  .chip.add:hover{color:var(--accent);border-color:var(--accent-soft)}
+
+  .add-idea{margin:14px 24px 4px;display:flex;gap:9px;align-items:stretch;background:var(--panel);border:1px solid var(--line);border-radius:3px;padding:10px 12px;transition:.13s}
+  .add-idea:focus-within{border-color:var(--accent-soft)}
+  .add-idea textarea{flex:1;min-height:20px;max-height:160px;line-height:1.55;letter-spacing:.2px}
+  .add-idea textarea::placeholder{color:var(--txt-faint)}
+  .add-idea .cat-pick{flex-shrink:0;color:var(--accent);font-size:10px;text-transform:uppercase;letter-spacing:1px;background:var(--panel-2);border:1px solid var(--line);border-radius:3px;padding:5px 9px;cursor:pointer;align-self:flex-start}
+  .add-idea .cat-pick:hover{border-color:var(--accent-soft)}
+  .add-idea button.go{flex-shrink:0;background:transparent;color:var(--accent);border:1px solid var(--accent-soft);font-size:10px;text-transform:uppercase;letter-spacing:1.5px;font-weight:700;padding:0 15px;border-radius:3px;align-self:stretch;transition:.1s}
+  .add-idea button.go:hover{background:var(--accent-tint)}
+  .add-idea button.go:disabled{opacity:.3;cursor:default;background:none}
+
+  .ideas{flex:1;overflow-y:auto;padding:8px 24px 40px}
+  .idea{display:flex;gap:12px;align-items:flex-start;padding:11px 13px;border:1px solid var(--line-soft);border-radius:3px;margin-bottom:6px;background:var(--panel);transition:.1s}
+  .idea:hover{border-color:var(--line);background:var(--panel-2)}
+  .idea .check{width:15px;height:15px;border:1px solid var(--txt-faint);border-radius:2px;flex-shrink:0;margin-top:2px;cursor:pointer;transition:.1s;display:flex;align-items:center;justify-content:center}
+  .idea .check:hover{border-color:var(--accent)}
+  .idea.done .check{background:var(--accent-soft);border-color:var(--accent-soft)}
+  .idea.done .check svg{opacity:1}
+  .idea .check svg{opacity:0;color:#0a0a0c}
+  .idea .body{flex:1;min-width:0}
+  .idea .text{white-space:pre-wrap;word-wrap:break-word;color:var(--txt-body);font-size:13px}
+  .idea.done .text{color:var(--txt-faint);text-decoration:line-through;text-decoration-color:var(--txt-faint)}
+  .idea .meta{display:flex;gap:0;margin-top:7px;align-items:center;font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--txt-faint)}
+  .idea .tag{color:var(--accent);opacity:.9}
+  .idea.done .tag{opacity:.4}
+  .idea .del{opacity:0;color:var(--txt-faint);font-size:15px;padding:0 3px;transition:.1s;align-self:flex-start}
+  .idea:hover .del{opacity:1}
+  .idea .del:hover{color:#c86a5a}
+
+  .empty{display:flex;flex-direction:column;align-items:center;justify-content:center;flex:1;color:var(--txt-faint);text-align:center;gap:12px;padding:50px}
+  .empty .big{font-size:12px;color:var(--txt-dim);text-transform:uppercase;letter-spacing:2px}
+  .empty .hint{font-size:11.5px;max-width:360px;line-height:1.7;color:var(--txt-faint);letter-spacing:.3px}
+
+  ::-webkit-scrollbar{width:10px;height:10px}
+  ::-webkit-scrollbar-thumb{background:#232429;border:3px solid transparent;background-clip:padding-box}
+  ::-webkit-scrollbar-thumb:hover{background:#31333a;background-clip:padding-box}
+  ::-webkit-scrollbar-track{background:transparent}
+
+  .overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:center;justify-content:center;z-index:50}
+  .overlay.show{display:flex}
+  .dialog{background:var(--panel);border:1px solid var(--line);border-radius:3px;padding:20px;width:340px;max-width:90vw;box-shadow:0 20px 60px rgba(0,0,0,.6)}
+  .dialog h3{font-size:11px;margin-bottom:14px;font-weight:700;text-transform:uppercase;letter-spacing:2px;color:var(--txt)}
+  .dialog input{width:100%;background:var(--panel-2);border:1px solid var(--line);border-radius:3px;padding:9px 11px;margin-bottom:16px;letter-spacing:.3px}
+  .dialog input:focus{border-color:var(--accent-soft)}
+  .dialog .row{display:flex;gap:8px;justify-content:flex-end}
+  .dialog button{padding:6px 15px;border-radius:3px;font-size:10px;text-transform:uppercase;letter-spacing:1.5px;border:1px solid var(--line)}
+  .dialog .cancel{color:var(--txt-dim)}
+  .dialog .cancel:hover{color:var(--txt);border-color:var(--txt-dim)}
+  .dialog .ok{color:var(--accent);border-color:var(--accent-soft);font-weight:700}
+  .dialog .ok:hover{background:var(--accent-tint)}
+  .dialog.wide{width:420px}
+  .dialog label{display:block;font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--txt-dim);margin-bottom:5px}
+  .dialog .hintline{font-size:10.5px;color:var(--txt-faint);line-height:1.65;margin:-8px 0 15px}
+  .dialog .hintline a{color:var(--accent);text-decoration:none}
+  .dialog .cloud-status{font-size:11px;margin-bottom:14px;min-height:15px;color:var(--txt-dim);letter-spacing:.3px}
+  .dialog .cloud-status.ok{color:var(--accent)}
+  .dialog .cloud-status.err{color:#c86a5a}
+  .dialog .row.split{justify-content:space-between}
+
+  .popover{position:fixed;background:var(--panel);border:1px solid var(--line);border-radius:3px;padding:4px;z-index:60;box-shadow:0 12px 40px rgba(0,0,0,.6);display:none;min-width:170px;max-height:280px;overflow-y:auto}
+  .popover.show{display:block}
+  .popover button{display:block;width:100%;text-align:left;padding:7px 10px;border-radius:2px;color:var(--txt-dim);font-size:11px;text-transform:uppercase;letter-spacing:1px}
+  .popover button:hover{background:var(--panel-2);color:var(--txt)}
+  .popover button.new{color:var(--accent);border-top:1px solid var(--line-soft);margin-top:4px;padding-top:9px}
+
+  .hidden{display:none!important}
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <div class="brand"><b>◆</b>Tasks</div>
+    <div class="stats" id="stats"></div>
+    <div class="search">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>
+      <input id="search" type="text" placeholder="Rechercher…" autocomplete="off">
+    </div>
+    <div class="top-actions">
+      <button id="cloudBtn" title="Synchronisation GitHub Gist">○ Cloud</button>
+      <button id="exportBtn" title="Sauvegarder dans un fichier .json">Export</button>
+      <button id="importBtn" title="Restaurer depuis un fichier .json">Import</button>
+      <input type="file" id="importFile" accept=".json" class="hidden">
+    </div>
+  </div>
+
+  <div class="main">
+    <aside class="sidebar">
+      <div class="panel-head">
+        <span class="label">Projets</span>
+        <button class="add" id="addProject" title="Nouveau projet">+</button>
+      </div>
+      <div class="projects" id="projects"></div>
+    </aside>
+    <section class="content" id="content"></section>
+  </div>
+
+  <div class="overlay" id="overlay">
+    <div class="dialog">
+      <h3 id="dlgTitle">Titre</h3>
+      <input id="dlgInput" type="text" autocomplete="off">
+      <div class="row">
+        <button class="cancel" id="dlgCancel">Annuler</button>
+        <button class="ok" id="dlgOk">OK</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="overlay" id="cloudOverlay">
+    <div class="dialog wide">
+      <h3>Sync — GitHub Gist</h3>
+      <div class="hintline">Token classique avec le scope <b>gist</b> (créé sur <a href="https://github.com/settings/tokens/new?scopes=gist&description=TASKS" target="_blank">github.com/settings/tokens</a>). Stocké uniquement sur cet appareil, jamais dans le fichier. Laisse le Gist ID vide pour en créer un nouveau automatiquement.</div>
+      <label>Token</label>
+      <input id="cfgToken" type="password" placeholder="ghp_… ou github_pat_…" autocomplete="off">
+      <label>Gist ID <span style="color:var(--txt-faint)">(vide = créer)</span></label>
+      <input id="cfgId" type="text" placeholder="ex. 4f1a9c2e…" autocomplete="off">
+      <div class="cloud-status" id="cloudStatus"></div>
+      <div class="row split">
+        <button class="cancel" id="cfgDisconnect">Déconnecter</button>
+        <div style="display:flex;gap:8px">
+          <button class="cancel" id="cfgCancel">Fermer</button>
+          <button class="ok" id="cfgSave">Connecter</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="popover" id="popover"></div>
+
+<script>
+(function(){
+  "use strict";
+  const KEY="tasks.store.v1";
+  const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,7);
+
+  let store=load();
+  let activeProject=store.projects[0]?store.projects[0].id:null;
+  let activeCat="__all__";
+  let composeCat=null;
+  let searchTerm="";
+
+  function load(){
+    try{const raw=localStorage.getItem(KEY);if(raw)return JSON.parse(raw);}catch(e){}
+    return {projects:[]};
+  }
+
+  function persistLocal(){localStorage.setItem(KEY,JSON.stringify(store));}
+  function save(){store.updatedAt=Date.now();persistLocal();schedulePush();}
+  function proj(id){return store.projects.find(p=>p.id===id);}
+  function fixActive(){if(!proj(activeProject))activeProject=store.projects[0]?store.projects[0].id:null;}
+  function fmtDate(ts){return new Date(ts).toLocaleDateString("fr-FR",{day:"2-digit",month:"short"});}
+  function meta(pairs){return pairs.map(p=>`<span class="k">${p[0]}</span> <span class="v${p[2]?" am":""}">${p[1]}</span>`).join('<span class="sep">·</span>');}
+
+  // ---- Cloud sync (GitHub Gist) ----
+  const CFG_TOKEN="tasks.gist.token",CFG_ID="tasks.gist.id",GFILE="tasks.json";
+  const cloud={token:localStorage.getItem(CFG_TOKEN)||"",id:localStorage.getItem(CFG_ID)||""};
+  let pushTimer=null;
+  const cloudOn=()=>!!(cloud.token&&cloud.id);
+  function ghHeaders(json){const h={Authorization:"token "+cloud.token,Accept:"application/vnd.github+json"};if(json)h["Content-Type"]="application/json";return h;}
+  function renderCloudBtn(state){
+    const b=document.getElementById("cloudBtn");if(!b)return;
+    const map={off:["○ Cloud",""],syncing:["↻ Sync…","busy"],synced:["☁ Sync","ok"],offline:["⚠ Offline","warn"],error:["⚠ Erreur","err"]};
+    const s=cloudOn()?(state||"synced"):"off";const m=map[s]||map.off;
+    b.textContent=m[0];b.className=m[1];
+  }
+  async function cloudPull(){
+    if(!cloudOn())return;renderCloudBtn("syncing");
+    try{
+      const r=await fetch("https://api.github.com/gists/"+cloud.id,{headers:ghHeaders()});
+      if(!r.ok)throw new Error("HTTP "+r.status);
+      const g=await r.json();const f=g.files&&g.files[GFILE];
+      if(f){
+        let content=f.content;
+        if(f.truncated&&f.raw_url){content=await(await fetch(f.raw_url)).text();}
+        const data=JSON.parse(content);
+        if(data&&Array.isArray(data.projects)){store=data;persistLocal();fixActive();renderAll();}
+      }
+      renderCloudBtn("synced");return true;
+    }catch(e){renderCloudBtn(navigator.onLine?"error":"offline");return false;}
+  }
+  async function cloudPush(){
+    if(!cloudOn())return;renderCloudBtn("syncing");
+    try{
+      const body={files:{}};body.files[GFILE]={content:JSON.stringify(store,null,2)};
+      const r=await fetch("https://api.github.com/gists/"+cloud.id,{method:"PATCH",headers:ghHeaders(true),body:JSON.stringify(body)});
+      if(!r.ok)throw new Error("HTTP "+r.status);
+      renderCloudBtn("synced");return true;
+    }catch(e){renderCloudBtn(navigator.onLine?"error":"offline");return false;}
+  }
+  function schedulePush(){if(!cloudOn())return;clearTimeout(pushTimer);pushTimer=setTimeout(()=>{pushTimer=null;cloudPush();},900);}
+  async function cloudCreate(){
+    const body={description:"TASKS — sync",public:false,files:{}};body.files[GFILE]={content:JSON.stringify(store,null,2)};
+    const r=await fetch("https://api.github.com/gists",{method:"POST",headers:ghHeaders(true),body:JSON.stringify(body)});
+    if(!r.ok)throw new Error("HTTP "+r.status);
+    const g=await r.json();return g.id;
+  }
+
+  // cloud dialog
+  const cloudOverlay=document.getElementById("cloudOverlay");
+  const cfgToken=document.getElementById("cfgToken");
+  const cfgId=document.getElementById("cfgId");
+  const cloudStatus=document.getElementById("cloudStatus");
+  function setCS(msg,cls){cloudStatus.textContent=msg||"";cloudStatus.className="cloud-status"+(cls?" "+cls:"");}
+  function openCloud(){
+    cfgToken.value=cloud.token;cfgId.value=cloud.id;
+    setCS(cloudOn()?"Connecté · gist "+cloud.id.slice(0,8)+"…":"Non connecté",cloudOn()?"ok":"");
+    cloudOverlay.classList.add("show");setTimeout(()=>cfgToken.focus(),30);
+  }
+  function closeCloud(){cloudOverlay.classList.remove("show");}
+  document.getElementById("cloudBtn").onclick=openCloud;
+  document.getElementById("cfgCancel").onclick=closeCloud;
+  cloudOverlay.addEventListener("mousedown",e=>{if(e.target===cloudOverlay)closeCloud();});
+  document.getElementById("cfgDisconnect").onclick=()=>{
+    cloud.token="";cloud.id="";localStorage.removeItem(CFG_TOKEN);localStorage.removeItem(CFG_ID);
+    renderCloudBtn();setCS("Déconnecté. Données conservées localement.","");
+  };
+  document.getElementById("cfgSave").onclick=async()=>{
+    const tok=cfgToken.value.trim(),gid=cfgId.value.trim();
+    if(!tok){setCS("Token requis.","err");return;}
+    cloud.token=tok;localStorage.setItem(CFG_TOKEN,tok);
+    try{
+      if(gid){
+        cloud.id=gid;localStorage.setItem(CFG_ID,gid);
+        setCS("Connexion…","");
+        const ok=await cloudPull();
+        setCS(ok?"Connecté ✓ données récupérées.":"Échec — vérifie le token / l'ID.",ok?"ok":"err");
+      }else{
+        setCS("Création du gist…","");
+        const newId=await cloudCreate();
+        cloud.id=newId;localStorage.setItem(CFG_ID,newId);
+        cfgId.value=newId;renderCloudBtn("synced");
+        setCS("Gist créé ✓ ID : "+newId+" (copie-le pour tes autres appareils).","ok");
+      }
+    }catch(e){setCS("Erreur : "+e.message+" — token valide avec scope gist ?","err");renderCloudBtn("error");}
+  };
+
+  const overlay=document.getElementById("overlay");
+  const dlgTitle=document.getElementById("dlgTitle");
+  const dlgInput=document.getElementById("dlgInput");
+  let dlgResolve=null;
+  function prompt(title,value){
+    dlgTitle.textContent=title;dlgInput.value=value||"";
+    overlay.classList.add("show");
+    setTimeout(()=>{dlgInput.focus();dlgInput.select();},30);
+    return new Promise(res=>{dlgResolve=res;});
+  }
+  function closeDlg(val){overlay.classList.remove("show");if(dlgResolve){dlgResolve(val);dlgResolve=null;}}
+  document.getElementById("dlgOk").onclick=()=>closeDlg(dlgInput.value.trim());
+  document.getElementById("dlgCancel").onclick=()=>closeDlg(null);
+  dlgInput.addEventListener("keydown",e=>{if(e.key==="Enter")closeDlg(dlgInput.value.trim());if(e.key==="Escape")closeDlg(null);});
+  overlay.addEventListener("mousedown",e=>{if(e.target===overlay)closeDlg(null);});
+
+  const popover=document.getElementById("popover");
+  function showPopover(anchor,cats,onPick,allowNew){
+    popover.innerHTML="";
+    cats.forEach(c=>{const b=document.createElement("button");b.textContent=c;b.onclick=()=>{hidePopover();onPick(c);};popover.appendChild(b);});
+    if(allowNew){const b=document.createElement("button");b.className="new";b.textContent="+ Catégorie…";b.onclick=async()=>{hidePopover();const name=await prompt("Nouvelle catégorie","");if(name)onPick(name,true);};popover.appendChild(b);}
+    const r=anchor.getBoundingClientRect();popover.classList.add("show");
+    let top=r.bottom+6,left=r.left;const pr=popover.getBoundingClientRect();
+    if(left+pr.width>window.innerWidth-10)left=window.innerWidth-pr.width-10;
+    if(top+pr.height>window.innerHeight-10)top=r.top-pr.height-6;
+    popover.style.top=top+"px";popover.style.left=left+"px";
+  }
+  function hidePopover(){popover.classList.remove("show");}
+  document.addEventListener("mousedown",e=>{if(!popover.contains(e.target))hidePopover();});
+
+  function renderStats(){
+    let ideas=0,open=0;
+    store.projects.forEach(p=>{ideas+=p.ideas.length;open+=p.ideas.filter(i=>!i.done).length;});
+    document.getElementById("stats").innerHTML=meta([["Proj",store.projects.length],["Tâches",ideas],["Ouvertes",open,true]]);
+  }
+
+  function renderSidebar(){
+    const el=document.getElementById("projects");el.innerHTML="";
+    store.projects.forEach((p,idx)=>{
+      const open=p.ideas.filter(i=>!i.done).length;
+      const d=document.createElement("div");
+      d.className="proj"+(p.id===activeProject?" active":"");
+      d.innerHTML=`<span class="idx">P${String(idx+1).padStart(2,"0")}</span><span class="name"></span><span class="count">${open}</span><span class="x" title="Supprimer">×</span>`;
+      d.querySelector(".name").textContent=p.name;
+      d.onclick=(e)=>{if(e.target.classList.contains("x"))return;activeProject=p.id;activeCat="__all__";composeCat=null;renderAll();};
+      d.querySelector(".x").onclick=(e)=>{e.stopPropagation();if(confirm(`Supprimer le projet « ${p.name} » et toutes ses tâches ?`)){store.projects=store.projects.filter(x=>x.id!==p.id);if(activeProject===p.id)activeProject=store.projects[0]?store.projects[0].id:null;save();renderAll();}};
+      el.appendChild(d);
+    });
+  }
+
+  function renderContent(){
+    const c=document.getElementById("content");
+    renderStats();
+    if(searchTerm){renderSearch(c);return;}
+    const p=proj(activeProject);
+    if(!p){c.innerHTML=`<div class="empty"><div class="big">Aucun projet</div><div class="hint">Clique <b>○ Cloud</b> en haut à droite et saisis ton token + Gist ID pour charger tes notes synchronisées — ou « + » à gauche pour créer un projet.</div></div>`;return;}
+    const total=p.ideas.length,open=p.ideas.filter(i=>!i.done).length,done=total-open;
+    if(!composeCat||!p.cats.includes(composeCat))composeCat=p.cats[0]||"Général";
+
+    c.innerHTML=`
+      <div class="content-head">
+        <div class="content-title"><span class="t"></span><span class="edit">✎ Renommer</span></div>
+        <div class="content-sub">${meta([["Tâches",total],["Ouvertes",open,true],["Faites",done]])}</div>
+      </div>
+      <div class="cats" id="cats"></div>
+      <div class="add-idea">
+        <textarea id="compose" placeholder="Nouvelle tâche — Entrée pour ajouter · Maj+Entrée = saut de ligne" rows="1"></textarea>
+        <button class="cat-pick" id="composeCat"></button>
+        <button class="go" id="composeGo" disabled>Add</button>
+      </div>
+      <div class="ideas" id="ideas"></div>`;
+
+    c.querySelector(".t").textContent=p.name;
+    c.querySelector(".content-title").onclick=async()=>{const nm=await prompt("Renommer le projet",p.name);if(nm){p.name=nm;save();renderAll();}};
+
+    const catsEl=c.querySelector("#cats");
+    const chip=(label,key,count)=>{const b=document.createElement("button");b.className="chip"+(activeCat===key?" active":"");b.innerHTML=`${label}<span class="c">${count}</span>`;b.onclick=()=>{activeCat=key;renderContent();};return b;};
+    catsEl.appendChild(chip("Toutes","__all__",total));
+    p.cats.forEach(cat=>{const cnt=p.ideas.filter(i=>i.cat===cat).length;const b=chip(cat,cat,cnt);b.oncontextmenu=(e)=>{e.preventDefault();catActions(cat,b);};catsEl.appendChild(b);});
+    const addChip=document.createElement("button");addChip.className="chip add";addChip.textContent="+ Cat";
+    addChip.onclick=async()=>{const name=await prompt("Nouvelle catégorie","");if(name&&!p.cats.includes(name)){p.cats.push(name);save();renderContent();}};
+    catsEl.appendChild(addChip);
+
+    const compose=c.querySelector("#compose");
+    const composeGo=c.querySelector("#composeGo");
+    const composeCatBtn=c.querySelector("#composeCat");
+    composeCatBtn.textContent="◆ "+composeCat;
+    composeCatBtn.onclick=()=>{showPopover(composeCatBtn,p.cats,(cat,isNew)=>{if(isNew&&!p.cats.includes(cat)){p.cats.push(cat);save();}composeCat=cat;renderContent();setTimeout(()=>{const el=c.querySelector("#compose");if(el)el.focus();},10);},true);};
+    const autogrow=()=>{compose.style.height="auto";compose.style.height=Math.min(compose.scrollHeight,160)+"px";};
+    compose.addEventListener("input",()=>{composeGo.disabled=!compose.value.trim();autogrow();});
+    compose.addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();addIdea(compose.value);}});
+    composeGo.onclick=()=>addIdea(compose.value);
+    function addIdea(text){text=text.trim();if(!text)return;p.ideas.unshift({id:uid(),text,cat:composeCat,done:false,ts:Date.now()});save();renderContent();setTimeout(()=>{const el=c.querySelector("#compose");if(el)el.focus();},10);}
+
+    renderIdeas(c.querySelector("#ideas"),p);
+    setTimeout(()=>{const el=c.querySelector("#compose");if(el)el.focus();},10);
+  }
+
+  function catActions(cat,anchor){
+    const p=proj(activeProject);
+    showPopover(anchor,["Renommer","Supprimer → Général"],(action)=>{
+      if(action==="Renommer"){
+        prompt("Renommer la catégorie",cat).then(nm=>{if(nm&&nm!==cat){p.ideas.forEach(i=>{if(i.cat===cat)i.cat=nm;});p.cats=p.cats.map(x=>x===cat?nm:x);if(activeCat===cat)activeCat=nm;if(composeCat===cat)composeCat=nm;save();renderContent();}});
+      }else{
+        if(!p.cats.includes("Général"))p.cats.unshift("Général");
+        p.ideas.forEach(i=>{if(i.cat===cat)i.cat="Général";});
+        p.cats=p.cats.filter(x=>x!==cat);
+        if(activeCat===cat)activeCat="__all__";if(composeCat===cat)composeCat="Général";
+        save();renderContent();
+      }
+    },false);
+  }
+
+  const CHK=`<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4"><path d="M20 6L9 17l-5-5"/></svg>`;
+  function ideaEl(i,p,tagText){
+    const d=document.createElement("div");
+    d.className="idea"+(i.done?" done":"");
+    d.innerHTML=`<div class="check">${CHK}</div><div class="body"><div class="text"></div><div class="meta"><span class="tag">◆ ${tagText}</span><span class="sep">·</span><span>${fmtDate(i.ts)}</span></div></div><button class="del" title="Supprimer">×</button>`;
+    d.querySelector(".text").textContent=i.text;
+    d.querySelector(".check").onclick=()=>{i.done=!i.done;save();renderContent();};
+    d.querySelector(".del").onclick=()=>{p.ideas=p.ideas.filter(x=>x.id!==i.id);save();renderContent();};
+    d.querySelector(".text").ondblclick=async()=>{const nm=await prompt("Modifier la tâche",i.text);if(nm){i.text=nm;save();renderContent();}};
+    return d;
+  }
+
+  function renderIdeas(el,p){
+    let list=p.ideas.slice();
+    if(activeCat!=="__all__")list=list.filter(i=>i.cat===activeCat);
+    list.sort((a,b)=>(a.done-b.done)||(b.ts-a.ts));
+    if(list.length===0){el.innerHTML=`<div class="empty"><div class="big">Vide</div><div class="hint">Note ta première tâche dans le champ ci-dessus. Clic droit sur une catégorie pour la renommer ou la supprimer.</div></div>`;return;}
+    el.innerHTML="";list.forEach(i=>el.appendChild(ideaEl(i,p,i.cat)));
+  }
+
+  function renderSearch(c){
+    const term=searchTerm.toLowerCase();const hits=[];
+    store.projects.forEach(p=>p.ideas.forEach(i=>{if(i.text.toLowerCase().includes(term)||i.cat.toLowerCase().includes(term))hits.push({p,i});}));
+    c.innerHTML=`<div class="content-head"><div class="content-title"><span class="t">Recherche</span></div><div class="content-sub">${meta([["Résultats",hits.length,true],["Terme",searchTerm]])}</div></div><div class="ideas" id="ideas"></div>`;
+    const el=c.querySelector("#ideas");
+    if(hits.length===0){el.innerHTML=`<div class="empty"><div class="big">Aucun résultat</div></div>`;return;}
+    hits.sort((a,b)=>(a.i.done-b.i.done)||(b.i.ts-a.i.ts));
+    hits.forEach(({p,i})=>el.appendChild(ideaEl(i,p,p.name+" / "+i.cat)));
+  }
+
+  function renderAll(){renderSidebar();renderContent();}
+
+  document.getElementById("addProject").onclick=async()=>{const name=await prompt("Nouveau projet","");if(name){const p={id:uid(),name,cats:["Général"],ideas:[]};store.projects.push(p);activeProject=p.id;activeCat="__all__";composeCat=null;save();renderAll();}};
+  const searchEl=document.getElementById("search");
+  searchEl.addEventListener("input",()=>{searchTerm=searchEl.value.trim();renderContent();});
+  searchEl.addEventListener("keydown",e=>{if(e.key==="Escape"){searchEl.value="";searchTerm="";renderContent();}});
+
+  document.getElementById("exportBtn").onclick=()=>{const blob=new Blob([JSON.stringify(store,null,2)],{type:"application/json"});const a=document.createElement("a");const d=new Date();const stamp=d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");a.href=URL.createObjectURL(blob);a.download="tasks-"+stamp+".json";a.click();};
+  document.getElementById("importBtn").onclick=()=>document.getElementById("importFile").click();
+  document.getElementById("importFile").addEventListener("change",e=>{const f=e.target.files[0];if(!f)return;const r=new FileReader();r.onload=()=>{try{const data=JSON.parse(r.result);if(!data.projects)throw new Error("format");if(confirm("Remplacer toutes les données actuelles par le fichier importé ?")){store=data;activeProject=store.projects[0]?store.projects[0].id:null;activeCat="__all__";composeCat=null;save();renderAll();}}catch(err){alert("Fichier invalide.");}};r.readAsText(f);e.target.value="";});
+
+  document.addEventListener("keydown",e=>{if(e.key==="/"&&document.activeElement.tagName!=="INPUT"&&document.activeElement.tagName!=="TEXTAREA"){e.preventDefault();searchEl.focus();}});
+
+  // ---- startup + background sync ----
+  renderAll();
+  renderCloudBtn();
+  if(cloudOn())cloudPull();
+  // pull remote changes periodically, but never while the user is typing or a dialog is open
+  function canAutoPull(){
+    if(!cloudOn()||pushTimer||!navigator.onLine)return false;
+    if(overlay.classList.contains("show")||cloudOverlay.classList.contains("show"))return false;
+    const a=document.activeElement,t=a&&a.tagName;
+    if(t==="TEXTAREA")return false;
+    if(t==="INPUT"&&(a.value||"").trim())return false;
+    return true;
+  }
+  setInterval(()=>{if(canAutoPull())cloudPull();},45000);
+  window.addEventListener("online",()=>{if(cloudOn())cloudPull();});
+})();
+</script>
+</body>
+</html>
