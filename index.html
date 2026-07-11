@@ -27,6 +27,8 @@
   ::-webkit-scrollbar-track{background:transparent}
   .otk-xscroll{scrollbar-width:none;-ms-overflow-style:none}
   .otk-xscroll::-webkit-scrollbar{display:none}
+  @media(min-width:641px) and (max-width:900px){.otk-stats,.otk-sep{display:none!important}}
+  @media(min-width:641px) and (max-width:780px){.otk-search{width:150px!important}}
   @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
   #app{height:100vh;height:100dvh}
   [data-act]{-webkit-tap-highlight-color:transparent}
@@ -112,7 +114,7 @@ let settings=loadSettings();
 
 /* ============================ state ============================ */
 let store=load();
-let view={projectId:null,tag:'ALL',search:'',composerIcon:'sine',expanded:{},drawer:false,searchOpen:false,sheetId:null,sheetNew:null,deskNav:true};
+let view={projectId:null,tag:'ALL',search:'',composerIcon:'sine',expanded:{},drawer:false,searchOpen:false,tagsOpen:false,editorTagsOpen:{},deskNav:true};
 let subDraft={};
 let picker={open:false,target:null};
 let promptS={open:false,kind:'project',value:''};
@@ -238,10 +240,12 @@ function filteredTasks(proj){
 
 /* ============================ handlers ============================ */
 function selectProject(id){view.projectId=id;view.tag='ALL';view.search='';view.drawer=false;view.expanded={};render();}
-function selectTag(id){view.tag=id;render();}
+function selectTag(id){view.tag=id;view.tagsOpen=false;render();}
+function toggleTags(){view.tagsOpen=!view.tagsOpen;render();}
+function toggleEditorTags(id){view.editorTagsOpen[id]=!view.editorTagsOpen[id];render();}
 function toggleDone(id){const t=store.tasks.find(x=>x.id===id);if(t){t.done=!t.done;save();render();}}
 function toggleExpand(id){if(view.expanded[id])delete view.expanded[id];else view.expanded[id]=true;render();}
-function deleteTask(id){store.tasks=store.tasks.filter(t=>t.id!==id);if(view.sheetId===id){view.sheetId=null;view.sheetNew=null;}save();render();}
+function deleteTask(id){store.tasks=store.tasks.filter(t=>t.id!==id);save();render();}
 function setTitle(id,val){const t=store.tasks.find(x=>x.id===id);if(t){t.title=val;store.updatedAt=Date.now();persistLocal();schedulePush();}}
 function setDetail(id,val){const t=store.tasks.find(x=>x.id===id);if(t){t.detail=val;store.updatedAt=Date.now();persistLocal();schedulePush();}}
 function toggleSub(id,i){const t=store.tasks.find(x=>x.id===id);if(t&&t.subs[i]){t.subs[i].done=!t.subs[i].done;save();render();}}
@@ -253,8 +257,6 @@ function addTask(){
   store.tasks.unshift({id:'t'+uid(),projectId:view.projectId,icon:view.composerIcon,title,detail,tagIds,done:false,ts,date:fmtDate(ts),subs:[]});
   save();render();const nt=document.getElementById('otk-composer');if(nt)nt.focus();
 }
-function newTaskSheet(){if(!view.projectId)return;const ts=Date.now();const id='t'+uid();const tagIds=view.tag!=='ALL'?[view.tag]:[];store.tasks.unshift({id,projectId:view.projectId,icon:view.composerIcon,title:'',detail:'',tagIds,done:false,ts,date:fmtDate(ts),subs:[]});view.sheetId=id;view.sheetNew=id;save();render();}
-function closeSheet(){if(view.sheetNew){const t=store.tasks.find(x=>x.id===view.sheetNew);if(t&&!t.title.trim()&&!t.detail.trim()&&t.subs.length===0)store.tasks=store.tasks.filter(x=>x.id!==t.id);}view.sheetId=null;view.sheetNew=null;save();render();}
 function openPicker(kind,id){picker={open:true,target:{kind,id:id||null}};render();}
 function closePicker(){picker.open=false;render();}
 function pickIcon(key){const tg=picker.target;picker={open:false,target:null};
@@ -272,10 +274,10 @@ function deleteProject(id){const p=store.projects.find(x=>x.id===id);if(!p)retur
 function toggleSearchM(){view.searchOpen=!view.searchOpen;if(!view.searchOpen)view.search='';render();}
 function setSetting(key,val){if(key==='glyphes')val=parseFloat(val);settings[key]=val;saveSettings();render();}
 
-let _sw=null;
-function swMove(e){if(!_sw)return;let dx=e.clientX-_sw.x0;dx=Math.max(-132,Math.min(132,dx));_sw.dx=dx;if(Math.abs(dx)>4)_sw.moved=true;_sw.el.style.transition='none';_sw.el.style.transform='translateX('+dx+'px)';}
-function swEnd(){if(!_sw)return;const sw=_sw;_sw=null;window.removeEventListener('pointermove',swMove);window.removeEventListener('pointerup',swEnd);window.removeEventListener('pointercancel',swEnd);const el=sw.el,dx=sw.dx;el.style.transition='transform .22s ease';el.style.transform='translateX(0px)';if(!sw.moved){toggleExpand(sw.id);return;}if(dx>80)toggleDone(sw.id);else if(dx<-80)deleteTask(sw.id);}
-function swStart(id,el,e){_sw={id,x0:e.clientX,el,dx:0,moved:false};window.addEventListener('pointermove',swMove);window.addEventListener('pointerup',swEnd);window.addEventListener('pointercancel',swEnd);}
+let _sw=null,_suppressClick=false;
+function swMove(e){if(!_sw)return;let dx=e.clientX-_sw.x0;dx=Math.max(-140,Math.min(140,dx));_sw.dx=dx;if(Math.abs(dx)>8)_sw.dragged=true;_sw.el.style.transition='none';_sw.el.style.transform='translateX('+dx+'px)';}
+function swEnd(){if(!_sw)return;const sw=_sw;_sw=null;window.removeEventListener('pointermove',swMove);window.removeEventListener('pointerup',swEnd);window.removeEventListener('pointercancel',swEnd);const el=sw.el,dx=sw.dx;el.style.transition='transform .22s ease';el.style.transform='translateX(0px)';if(sw.dragged){_suppressClick=true;setTimeout(()=>{_suppressClick=false;},350);if(dx>80)toggleDone(sw.id);else if(dx<-80)deleteTask(sw.id);}}
+function swStart(id,el,e){_sw={id,x0:e.clientX,el,dx:0,dragged:false};window.addEventListener('pointermove',swMove);window.addEventListener('pointerup',swEnd);window.addEventListener('pointercancel',swEnd);}
 
 /* ============================ per-task view-model ============================ */
 function buildTask(t,proj,tById){
@@ -298,6 +300,7 @@ function buildTask(t,proj,tById){
 function taskEditorHTML(bt,proj,tById){
   const t=bt.t,g=bt.g,mini=Math.round(13*g);
   const allTags=(proj.tagIds||[]).map(id=>tById[id]).filter(Boolean).map(tg=>{const active=t.tagIds.includes(tg.id);const cs='display:flex;align-items:center;gap:5px;padding:4px 8px;border-radius:var(--r3);font-family:inherit;font-size:10px;letter-spacing:.05em;text-transform:uppercase;cursor:pointer;border:1px solid '+(active?'var(--accent-line)':'var(--line)')+';background:'+(active?'var(--accent-soft)':'var(--surface2)')+';color:'+(active?'var(--accent)':'var(--dim2)')+';';return '<button data-act="toggleTaskTag" data-id="'+t.id+'" data-tid="'+tg.id+'" style="'+cs+'"><span style="display:flex">'+icon(tg.icon,mini)+'</span>'+esc(tg.label)+'</button>';}).join('');
+  const teAssigned=t.tagIds.map(id=>tById[id]).filter(Boolean);const teOpen=!!view.editorTagsOpen[t.id];
   const subs=t.subs.map((s,i)=>{const ck=s.done?'background:var(--accent2);border:1.5px solid var(--accent2);color:var(--bg);':'background:transparent;border:1.5px solid var(--line-strong);color:transparent;';const tx='font-size:12px;line-height:1.4;'+(s.done?'color:var(--faint);text-decoration:line-through;':'color:var(--text2);');return '<div data-act="toggleSub" data-id="'+t.id+'" data-i="'+i+'" style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:2px 0;"><span style="display:flex;align-items:center;justify-content:center;width:15px;height:15px;flex:none;border-radius:var(--r3);'+ck+'">'+(s.done?icon('check',10):'')+'</span><span style="'+tx+'">'+esc(s.text)+'</span></div>';}).join('');
   const doneBtn=(t.done?'background:transparent;border:1px solid var(--line-strong);color:var(--dim);':'background:var(--accent2-soft);border:1px solid var(--accent2-line);color:var(--accent2);')+'display:flex;align-items:center;gap:6px;padding:6px 13px;border-radius:var(--r2);cursor:pointer;font-family:inherit;font-size:11px;letter-spacing:.04em;text-transform:uppercase;';
   return '<div style="border-top:1px solid var(--line);background:var(--surface2);padding:11px 13px 13px;display:flex;flex-direction:column;gap:11px;">'
@@ -309,8 +312,8 @@ function taskEditorHTML(bt,proj,tById){
     +'<textarea class="otk-detail" data-id="'+t.id+'" placeholder="Details…" spellcheck="false" style="width:100%;min-height:46px;resize:vertical;background:var(--bg);border:1px solid var(--line);border-radius:var(--r2);padding:8px 10px;font-family:inherit;font-size:12.5px;line-height:1.55;color:var(--text2);outline:none;">'+esc(t.detail)+'</textarea>'
     +(t.subs.length?'<div style="display:flex;flex-direction:column;gap:3px;">'+subs+'</div>':'')
     +'<input class="otk-subdraft" data-id="'+t.id+'" value="'+esc(subDraft[t.id]||'')+'" placeholder="+ subtask" style="width:100%;background:transparent;border:1px dashed var(--line-strong);border-radius:var(--r3);padding:5px 9px;font-family:inherit;font-size:11.5px;color:var(--dim);outline:none;" />'
-    +'<div style="display:flex;flex-wrap:wrap;gap:5px;">'+allTags+'</div>'
-    +'<div style="display:flex;gap:8px;padding-top:2px;"><button data-act="toggleDone" data-id="'+t.id+'" style="'+doneBtn+'">'+(t.done?'Reopen':'Done')+'</button><span style="flex:1"></span><button data-act="deleteTask" data-id="'+t.id+'" title="Delete" style="display:flex;align-items:center;gap:6px;padding:6px 12px;border:1px solid var(--line-strong);border-radius:var(--r2);background:transparent;color:var(--dim2);font-family:inherit;font-size:11px;letter-spacing:.04em;text-transform:uppercase;cursor:pointer;">Delete</button></div>'
+    +'<div style="display:flex;flex-direction:column;gap:7px;"><button data-act="toggleEditorTags" data-id="'+t.id+'" style="display:flex;align-items:center;gap:8px;padding:5px 9px;border:1px solid var(--line);border-radius:var(--r3);background:var(--bg);font-family:inherit;font-size:10px;letter-spacing:.06em;text-transform:uppercase;cursor:pointer;align-self:flex-start;"><span style="color:var(--faint);">Tags</span>'+(teAssigned.length?'<span style="display:flex;gap:4px;color:var(--accent);">'+teAssigned.map(tg=>icon(tg.icon,mini)).join('')+'</span>':'<span style="color:var(--faint);">—</span>')+'<span style="display:flex;color:var(--faint);transition:transform .18s;transform:rotate('+(teOpen?'180deg':'0deg')+');">'+icon('chevron',13)+'</span></button>'+(teOpen?'<div style="display:flex;flex-wrap:wrap;gap:5px;">'+allTags+'</div>':'')+'</div>'
+    +'<div style="display:flex;gap:8px;padding-top:2px;"><button data-act="toggleDone" data-id="'+t.id+'" style="'+doneBtn+'">'+(t.done?'Reopen':'Done')+'</button><span style="flex:1"></span><button data-act="deleteTask" data-id="'+t.id+'" title="Delete" style="display:flex;align-items:center;gap:6px;padding:6px 12px;border:1px solid #5a3230;border-radius:var(--r2);background:rgba(224,90,70,.10);color:#e0705a;font-family:inherit;font-size:11px;letter-spacing:.04em;text-transform:uppercase;cursor:pointer;">Delete</button></div>'
   +'</div>';
 }
 
@@ -322,6 +325,11 @@ function tagBarHTML(proj,projTasks,nowrap){
   (proj.tagIds||[]).forEach(tid=>{const tg=tById[tid];if(!tg)return;const active=view.tag===tid;const cnt=projTasks.filter(t=>!t.done&&t.tagIds.includes(tid)).length;h+='<button data-act="selectTag" data-id="'+tid+'" style="'+chip(active)+nw+'"><span data-act="pickerFor" data-kind="tag" data-id="'+tid+'" title="Change icon" style="display:flex;cursor:pointer;">'+icon(tg.icon,Math.round(13*g))+'</span>'+esc(tg.label)+'<span style="font-size:9.5px;margin-left:1px;color:'+(active?'var(--accent)':'var(--faint)')+';">'+cnt+'</span></button>';});
   h+='<button data-act="addTag" title="New tag" style="display:flex;align-items:center;gap:5px;padding:4px 9px;'+nw+'border:1px dashed var(--line-strong);border-radius:var(--r3);background:transparent;color:var(--faint);font-family:inherit;font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;cursor:pointer;">+ Tag</button>';
   return h;
+}
+function filterButtonHTML(proj){
+  const g=G(),tById=tagMap();const active=view.tag!=='ALL'?tById[view.tag]:null;
+  const label=active?esc(active.label):'All';const ic=active?icon(active.icon,Math.round(13*g)):icon('sliders',Math.round(13*g));
+  return '<button data-act="toggleTags" title="Filter" style="display:flex;align-items:center;gap:6px;padding:5px 10px;flex:none;border:1px solid '+(active?'var(--accent-line)':'var(--line)')+';border-radius:var(--r3);background:'+(active?'var(--accent-soft)':'var(--bg2)')+';color:'+(active?'var(--accent)':'var(--dim)')+';font-family:inherit;font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;cursor:pointer;"><span style="display:flex;">'+ic+'</span>'+label+'<span style="display:flex;color:var(--faint);transition:transform .18s;transform:rotate('+(view.tagsOpen?'180deg':'0deg')+');">'+icon('chevron',13)+'</span></button>';
 }
 
 /* ============================ desktop ============================ */
@@ -367,21 +375,22 @@ function renderDesktop(){
   const header='<header class="otk-topbar" style="position:relative;display:flex;align-items:center;gap:13px;height:46px;padding:0 14px;border-bottom:1px solid var(--line);flex:none;">'
     +'<button data-act="toggleDeskNav" title="Projects panel" style="display:flex;align-items:center;justify-content:center;width:30px;height:30px;flex:none;border:1px solid transparent;border-radius:var(--r2);background:transparent;color:var(--dim2);cursor:pointer;">'+icon('menu',18)+'</button>'
     +'<span style="font-size:12.5px;font-weight:700;letter-spacing:.16em;color:var(--text);font-family:\'IBM Plex Mono\',ui-monospace,monospace;flex:none;">OPENTASKS</span>'
-    +'<span style="width:1px;height:18px;background:var(--line);flex:none;"></span>'
-    +'<span style="font-size:10.5px;letter-spacing:.06em;color:var(--faint);text-transform:uppercase;white-space:nowrap;">P'+gProj+' · T'+gTasks+' · ○'+gOpen+'</span>'
+    +'<span class="otk-sep" style="width:1px;height:18px;background:var(--line);flex:none;"></span>'
+    +'<span class="otk-stats" style="font-size:10.5px;letter-spacing:.06em;color:var(--faint);text-transform:uppercase;white-space:nowrap;">P'+gProj+' · T'+gTasks+' · ○'+gOpen+'</span>'
     +'<span style="flex:1"></span>'
-    +'<div style="'+searchStyle+'"><span style="color:var(--faint);display:flex;flex:none;">'+icon('search',15)+'</span><input id="otk-search" value="'+esc(view.search)+'" placeholder="Search…" style="flex:1;min-width:0;background:transparent;border:none;outline:none;font-family:inherit;font-size:12px;color:var(--text2);" /></div>'
-    +'<button data-act="openSettings" title="Settings" style="display:flex;align-items:center;justify-content:center;width:32px;height:32px;flex:none;border:1px solid var(--line);border-radius:var(--r2);background:var(--bg2);color:var(--dim);cursor:pointer;">'+icon('sliders',16)+'</button>'
-    +'<button data-act="openSync" title="GitHub Gist sync" style="display:flex;align-items:center;gap:7px;padding:6px 11px;flex:none;border:1px solid var(--line);border-radius:var(--r2);background:var(--bg2);color:var(--dim);font-family:inherit;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;cursor:pointer;"><span class="otk-syncdot" style="width:6px;height:6px;border-radius:50%;flex:none;"></span><span class="otk-synclabel">Sync</span></button></header>';
+    +'<div class="otk-search" style="'+searchStyle+'"><span style="color:var(--faint);display:flex;flex:none;">'+icon('search',15)+'</span><input id="otk-search" value="'+esc(view.search)+'" placeholder="Search…" style="flex:1;min-width:0;background:transparent;border:none;outline:none;font-family:inherit;font-size:12px;color:var(--text2);" /></div></header>';
   const sidebar=view.deskNav?('<aside style="width:210px;flex:none;border-right:1px solid var(--line);background:var(--bg2);display:flex;flex-direction:column;">'
     +'<div style="display:flex;align-items:center;justify-content:space-between;padding:13px 12px 8px;"><span style="font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--faint);">Projects</span><button data-act="addProject" title="New project" style="display:flex;align-items:center;justify-content:center;width:22px;height:22px;border:1px solid var(--line);border-radius:0;background:transparent;color:var(--dim2);cursor:pointer;">'+icon('plus',15)+'</button></div>'
     +'<div style="flex:1;overflow-y:auto;padding:2px 8px;">'+(projRows||'<div style="padding:12px;color:var(--faint);font-size:11px;line-height:1.6;">No projects.<br/>Click ＋.</div>')+'</div>'
-    +'<div style="padding:10px 13px;border-top:1px solid var(--line-soft);display:flex;align-items:center;gap:7px;"><span class="otk-syncdot" style="width:6px;height:6px;border-radius:50%;flex:none;"></span><span style="font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint);">Local · offline</span></div></aside>'):'';
+    +'<button data-act="openSettings" style="display:flex;align-items:center;gap:9px;padding:11px 13px;width:100%;text-align:left;border:none;border-top:1px solid var(--line-soft);background:transparent;color:var(--dim);cursor:pointer;font-family:inherit;"><span style="display:flex;">'+icon('sliders',16)+'</span><span style="font-size:10px;letter-spacing:.1em;text-transform:uppercase;">Settings</span></button>'
+    +'<button data-act="openSync" style="display:flex;align-items:center;gap:9px;padding:11px 13px;width:100%;text-align:left;border:none;border-top:1px solid var(--line-soft);background:transparent;cursor:pointer;font-family:inherit;"><span class="otk-syncdot" style="width:6px;height:6px;border-radius:50%;flex:none;"></span><span class="otk-synclabel" style="font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);">Sync</span></button>'
+    +'<div style="padding:8px 13px 10px;display:flex;align-items:center;gap:7px;"><span style="width:6px;height:6px;border-radius:50%;background:var(--accent2);flex:none;"></span><span style="font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint);">Local · offline</span></div></aside>'):'';
   let main;
   if(!proj){main='<main style="flex:1;display:flex;align-items:center;justify-content:center;text-align:center;padding:40px;"><div style="color:var(--faint);font-size:12.5px;line-height:1.8;">No project.<br/>Open the panel (☰) and hit ＋,<br/>or connect your gist via <b style="color:var(--accent)">Sync</b>.</div></main>';}
   else{const projTasks=store.tasks.filter(t=>t.projectId===proj.id);
     main='<main style="flex:1;min-width:0;display:flex;flex-direction:column;">'
-      +'<div style="display:flex;align-items:center;gap:10px;padding:13px 18px 12px;flex-wrap:wrap;flex:none;"><span style="color:var(--accent);display:flex;flex:none;">'+icon(proj.icon,Math.round(18*Math.min(g,1.3)))+'</span><h1 style="margin:0;font-size:16px;font-weight:700;letter-spacing:.01em;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:240px;flex:none;text-transform:var(--tt);">'+esc(proj.name)+'</h1><div style="display:flex;flex-wrap:wrap;gap:6px;flex:1;min-width:0;">'+tagBarHTML(proj,projTasks,false)+'</div></div>'
+      +'<div style="display:flex;align-items:center;gap:10px;padding:13px 18px 10px;flex:none;"><span style="color:var(--accent);display:flex;flex:none;">'+icon(proj.icon,Math.round(18*Math.min(g,1.3)))+'</span><h1 style="margin:0;font-size:16px;font-weight:700;letter-spacing:.01em;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0;text-transform:var(--tt);">'+esc(proj.name)+'</h1>'+filterButtonHTML(proj)+'</div>'
+      +(view.tagsOpen?'<div style="display:flex;flex-wrap:wrap;gap:6px;padding:0 18px 11px;flex:none;">'+tagBarHTML(proj,projTasks,false)+'</div>':'')
       +'<div style="padding:0 18px 12px;flex:none;"><div style="display:flex;align-items:center;gap:8px;padding:8px 9px;border:1px solid var(--line);border-radius:var(--r1);background:var(--surface);">'
         +'<button data-act="pickerFor" data-kind="composer" title="Task icon" style="display:flex;align-items:center;justify-content:center;width:32px;height:32px;flex:none;border:1px solid var(--line-strong);border-radius:var(--r2);background:var(--bg);color:var(--accent);cursor:pointer;">'+icon(view.composerIcon,20)+'</button>'
         +'<textarea id="otk-composer" rows="1" placeholder="New task…" spellcheck="false" style="flex:1;min-width:0;resize:none;min-height:20px;max-height:120px;background:transparent;border:none;outline:none;font-family:inherit;font-size:13px;line-height:1.5;color:var(--text);"></textarea>'
@@ -408,7 +417,7 @@ function tileListHTML(){
         +'<div style="position:absolute;inset:0;display:flex;">'
           +'<div style="flex:1;display:flex;align-items:center;gap:9px;padding-left:22px;background:var(--accent2-soft);color:var(--accent2);font-size:11px;letter-spacing:.1em;text-transform:uppercase;">'+icon('check',17)+'Done</div>'
           +'<div style="flex:1;display:flex;align-items:center;justify-content:flex-end;gap:9px;padding-right:22px;background:rgba(224,90,70,.16);color:#e0705a;font-size:11px;letter-spacing:.1em;text-transform:uppercase;">Delete'+icon('trash',17)+'</div></div>'
-        +'<div class="otk-tile" data-id="'+t.id+'" style="position:relative;display:flex;align-items:center;gap:13px;padding:14px 16px;background:var(--surface2);touch-action:pan-y;cursor:grab;user-select:none;">'
+        +'<div class="otk-tile" data-act="toggleExpand" data-id="'+t.id+'" style="position:relative;display:flex;align-items:center;gap:13px;padding:14px 16px;background:var(--surface2);touch-action:pan-y;cursor:pointer;user-select:none;">'
           +'<span style="'+bt.rowIconStyle+'">'+bt.iconEl+'</span>'
           +'<div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:4px;"><span style="'+bt.titleStyle+'">'+esc(t.title)+'</span>'
             +'<div style="display:flex;align-items:center;gap:8px;"><span style="display:flex;gap:6px;color:var(--dim2);">'+bt.tagsMini+'</span>'+(t.subs.length?'<span style="font-size:10px;color:var(--faint);">'+bt.subsDone+'/'+t.subs.length+'</span>':'')+'<span style="flex:1"></span><span style="font-size:9.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--faint);">'+esc(t.date)+'</span></div></div>'
@@ -426,9 +435,9 @@ function renderMobile(){
     +'<button data-act="toggleSearch" title="Search" style="display:flex;align-items:center;justify-content:center;width:40px;height:40px;flex:none;border:none;border-radius:var(--r2);background:transparent;color:var(--dim);cursor:pointer;">'+icon('search',15)+'</button></header>';
   const searchRow=view.searchOpen?'<div style="flex:none;padding:0 12px 10px;"><div style="display:flex;align-items:center;gap:8px;padding:9px 12px;border:1px solid var(--line);border-radius:var(--r2);background:var(--bg2);"><span style="color:var(--faint);display:flex;">'+icon('search',15)+'</span><input id="otk-search" value="'+esc(view.search)+'" placeholder="Search…" style="flex:1;min-width:0;background:transparent;border:none;outline:none;font-family:inherit;font-size:14px;color:var(--text);" /></div></div>':'';
   const projTasks=proj?store.tasks.filter(t=>t.projectId===proj.id):[];
-  const chips=proj?('<div class="otk-xscroll" style="flex:none;display:flex;gap:7px;overflow-x:auto;padding:0 12px 11px;">'+tagBarHTML(proj,projTasks,true)+'</div>'):'';
-  const body='<div id="otk-list" style="flex:1;min-height:0;overflow-y:auto;padding:6px 0 calc(104px + env(safe-area-inset-bottom));">'+tileListHTML()+'</div>';
-  const fab='<button data-act="newTask" title="New task" style="position:absolute;right:18px;bottom:calc(28px + env(safe-area-inset-bottom));z-index:20;display:flex;align-items:center;justify-content:center;width:56px;height:56px;border:none;border-radius:var(--r1);background:var(--accent);color:var(--bg);box-shadow:0 8px 24px rgba(0,0,0,.45);cursor:pointer;">'+icon('plus',24)+'</button>';
+  const filterRow=proj?('<div style="flex:none;padding:0 12px 10px;">'+filterButtonHTML(proj)+(view.tagsOpen?'<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:9px;">'+tagBarHTML(proj,projTasks,false)+'</div>':'')+'</div>'):'';
+  const composer=proj?('<div style="flex:none;padding:0 12px 11px;"><div style="display:flex;align-items:center;gap:8px;padding:8px 9px;border:1px solid var(--line);border-radius:var(--r1);background:var(--surface);"><button data-act="pickerFor" data-kind="composer" title="Task icon" style="display:flex;align-items:center;justify-content:center;width:34px;height:34px;flex:none;border:1px solid var(--line-strong);border-radius:var(--r2);background:var(--bg);color:var(--accent);cursor:pointer;">'+icon(view.composerIcon,20)+'</button><textarea id="otk-composer" rows="1" placeholder="New task…" spellcheck="false" style="flex:1;min-width:0;resize:none;min-height:20px;max-height:110px;background:transparent;border:none;outline:none;font-family:inherit;font-size:14px;line-height:1.5;color:var(--text);"></textarea><button data-act="addTask" style="align-self:stretch;flex:none;padding:0 14px;border:none;border-radius:var(--r2);background:var(--accent);color:var(--bg);font-family:inherit;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;cursor:pointer;">Add</button></div></div>'):'';
+  const body='<div id="otk-list" style="flex:1;min-height:0;overflow-y:auto;padding:4px 0 calc(20px + env(safe-area-inset-bottom));">'+tileListHTML()+'</div>';
   let overlays='';
   if(view.drawer){let pr='';store.projects.forEach(p=>{const active=p&&proj&&p.id===proj.id;const cnt=store.tasks.filter(t=>t.projectId===p.id&&!t.done).length;pr+='<div data-act="selectProject" data-id="'+p.id+'" style="display:flex;align-items:center;gap:9px;padding:11px 8px;border-radius:0;cursor:pointer;margin-bottom:2px;'+(active?'background:var(--accent-dim);box-shadow:inset 2px 0 0 var(--accent);':'')+'"><span data-act="pickerFor" data-kind="project" data-id="'+p.id+'" style="display:flex;flex:none;padding:2px;cursor:pointer;color:'+(active?'var(--accent)':'var(--dim2)')+';">'+icon(p.icon,Math.round(15*Math.min(g,1.3)))+'</span><div style="display:flex;flex-direction:column;min-width:0;flex:1;gap:1px;"><span style="font-size:8.5px;letter-spacing:.12em;color:var(--faint);">'+esc(p.code)+'</span><span style="font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;'+(active?'font-weight:600;color:var(--text);':'color:var(--dim);')+'">'+esc(p.name)+'</span></div><span style="font-size:10px;flex:none;color:'+(active?'var(--accent)':'var(--faint)')+';">'+cnt+'</span></div>';});
     overlays+='<div data-act="closeDrawer" style="position:absolute;inset:0;z-index:30;background:rgba(0,0,0,.55);"></div>'
@@ -439,12 +448,7 @@ function renderMobile(){
       +'<button data-act="openSync" style="display:flex;align-items:center;gap:9px;padding:13px 16px;border:none;border-top:1px solid var(--line-soft);background:transparent;cursor:pointer;"><span class="otk-syncdot" style="width:6px;height:6px;border-radius:50%;flex:none;"></span><span style="font-size:11px;letter-spacing:.04em;color:var(--dim);">Sync — GitHub Gist</span></button>'
       +'<div style="padding:0 16px calc(20px + env(safe-area-inset-bottom));display:flex;align-items:center;gap:7px;"><span class="otk-syncdot" style="width:6px;height:6px;border-radius:50%;flex:none;"></span><span style="font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint);">Local · offline</span></div></aside>';
   }
-  if(view.sheetId){const st=store.tasks.find(t=>t.id===view.sheetId);if(st){const bt=buildTask(st,proj,tById);
-    overlays+='<div data-act="closeSheet" style="position:absolute;inset:0;z-index:40;background:rgba(0,0,0,.55);"></div>'
-      +'<div style="position:absolute;left:0;right:0;bottom:0;z-index:41;max-height:88%;display:flex;flex-direction:column;background:var(--surface2);border-top:1px solid var(--line);border-radius:20px 20px 0 0;box-shadow:0 -8px 40px rgba(0,0,0,.5);overflow:hidden;"><div style="flex:none;padding:10px 16px 8px;"><div style="width:38px;height:4px;border-radius:2px;background:var(--line-strong);margin:2px auto 12px;"></div><div style="display:flex;align-items:center;gap:10px;"><span style="color:var(--accent);display:flex;flex:none;">'+bt.iconElBig+'</span><span style="flex:1;min-width:0;font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--faint);">New task</span><button data-act="closeSheet" title="Close" style="display:flex;align-items:center;justify-content:center;width:32px;height:32px;flex:none;border:none;border-radius:var(--r2);background:transparent;color:var(--dim2);cursor:pointer;">'+icon('x',16)+'</button></div></div>'
-      +'<div style="flex:1;min-height:0;overflow-y:auto;padding-bottom:calc(24px + env(safe-area-inset-bottom));">'+taskEditorHTML(bt,proj,tById)+'</div></div>';}
-  }
-  return '<div style="position:relative;display:flex;flex-direction:column;height:100%;width:100%;overflow:hidden;background:var(--bg);color:var(--text);font-family:var(--font);">'+spacer+header+searchRow+chips+body+fab+overlays+'</div>';
+  return '<div style="position:relative;display:flex;flex-direction:column;height:100%;width:100%;overflow:hidden;background:var(--bg);color:var(--text);font-family:var(--font);">'+spacer+header+searchRow+filterRow+composer+body+overlays+'</div>';
 }
 
 /* ============================ modals ============================ */
@@ -486,19 +490,20 @@ function attachInputs(scope){
   scope.querySelectorAll('.otk-subdraft').forEach(el=>{el.addEventListener('input',()=>{subDraft[el.dataset.id]=el.value;});el.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();addSub(el.dataset.id,el.value);}});});
   scope.querySelectorAll('.otk-tile').forEach(el=>{el.addEventListener('pointerdown',e=>{if(e.target.closest('.otk-nosw'))return;swStart(el.dataset.id,el,e);});});
   if(scope===document){
-    const c=document.getElementById('otk-composer');if(c){c.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();addTask();}});c.addEventListener('input',()=>{c.style.height='auto';c.style.height=Math.min(c.scrollHeight,120)+'px';});if(!isMobile()&&!view.sheetId&&!picker.open&&!promptS.open&&!syncOpen&&!settingsOpen)c.focus();}
+    const c=document.getElementById('otk-composer');if(c){c.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();addTask();}});c.addEventListener('input',()=>{c.style.height='auto';c.style.height=Math.min(c.scrollHeight,120)+'px';});if(!isMobile()&&!picker.open&&!promptS.open&&!syncOpen&&!settingsOpen)c.focus();}
     const s=document.getElementById('otk-search');if(s){s.addEventListener('input',()=>{view.search=s.value;refreshList();});if(view.searchOpen&&isMobile())s.focus();}
     const p=document.getElementById('otk-prompt');if(p){p.addEventListener('input',()=>{promptS.value=p.value;});p.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();promptOk();}if(e.key==='Escape')closePrompt();});setTimeout(()=>p.focus(),20);}
     const gl=document.getElementById('otk-glyph');if(gl){gl.addEventListener('input',()=>{const v=document.getElementById('otk-glyphval');if(v)v.textContent=parseFloat(gl.value).toFixed(2)+'×';});gl.addEventListener('change',()=>setSetting('glyphes',gl.value));}
-    if(view.sheetNew){const tt=document.querySelector('.otk-title[data-id="'+view.sheetNew+'"]');if(tt)setTimeout(()=>tt.focus(),20);}
   }
 }
 document.getElementById('app').addEventListener('click',e=>{
-  const el=e.target.closest('[data-act]');if(!el)return;const d=el.dataset,act=d.act;
+  const el=e.target.closest('[data-act]');if(!el)return;if(_suppressClick){_suppressClick=false;if(el.dataset.act==='toggleExpand')return;}const d=el.dataset,act=d.act;
   switch(act){
     case 'stop':return;
     case 'selectProject':selectProject(d.id);break;
     case 'selectTag':selectTag(d.id);break;
+    case 'toggleTags':toggleTags();break;
+    case 'toggleEditorTags':toggleEditorTags(d.id);break;
     case 'toggleDone':toggleDone(d.id);break;
     case 'toggleExpand':toggleExpand(d.id);break;
     case 'deleteTask':deleteTask(d.id);break;
@@ -508,7 +513,6 @@ document.getElementById('app').addEventListener('click',e=>{
     case 'pickIcon':pickIcon(d.key);break;
     case 'closePicker':closePicker();break;
     case 'addTask':addTask();break;
-    case 'newTask':newTaskSheet();break;
     case 'addProject':openPrompt('project');break;
     case 'addTag':openPrompt('tag');break;
     case 'promptOk':promptOk();break;
@@ -520,7 +524,6 @@ document.getElementById('app').addEventListener('click',e=>{
     case 'openDrawer':view.drawer=true;render();break;
     case 'closeDrawer':view.drawer=false;render();break;
     case 'toggleSearch':toggleSearchM();break;
-    case 'closeSheet':closeSheet();break;
     case 'openSettings':settingsOpen=true;render();break;
     case 'closeSettings':settingsOpen=false;render();break;
     case 'setSetting':setSetting(d.key,d.val);break;
@@ -535,7 +538,7 @@ if(cloudOn())cloudPull();
 let _wasMobile=isMobile();
 MOBILE_Q.addEventListener('change',()=>{_wasMobile=isMobile();render();});
 window.addEventListener('resize',()=>{if(isMobile()!==_wasMobile){_wasMobile=isMobile();render();}});
-function canAutoPull(){if(!cloudOn()||pushTimer||!navigator.onLine)return false;if(picker.open||promptS.open||syncOpen||settingsOpen||view.sheetId)return false;const a=document.activeElement,t=a&&a.tagName;if(t==='TEXTAREA')return false;if(t==='INPUT'&&(a.value||'').trim())return false;return true;}
+function canAutoPull(){if(!cloudOn()||pushTimer||!navigator.onLine)return false;if(picker.open||promptS.open||syncOpen||settingsOpen)return false;const a=document.activeElement,t=a&&a.tagName;if(t==='TEXTAREA')return false;if(t==='INPUT'&&(a.value||'').trim())return false;return true;}
 setInterval(()=>{if(canAutoPull())cloudPull();},45000);
 window.addEventListener('online',()=>{if(cloudOn())cloudPull();});
 })();
