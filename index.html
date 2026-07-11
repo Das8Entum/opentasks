@@ -4,6 +4,13 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>OpenTasks</title>
+<meta name="theme-color" content="#0a0a0c">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="OpenTasks">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+PHJlY3Qgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiByeD0iNyIgZmlsbD0iIzBmMGYxMSIvPjxwYXRoIGQ9Ik0yNy41MCAxNi4wMCBMMjcuNDYgMTYuNjAgTDI3LjM2IDE3LjIwIEwyNy4xOCAxNy44MCBMMjYuOTQgMTguMzkgTDI2LjYyIDE4Ljk4IEwyNi4yNSAxOS41NSBMMjUuODEgMjAuMTIgTDI1LjMwIDIwLjY4IEwyNC43NCAyMS4yMiBMMjQuMTMgMjEuNzUgTDIzLjQ3IDIyLjI2IEwyMi43NiAyMi43NiBMMjIuMDEgMjMuMjQgTDIxLjIyIDIzLjcwIEwyMC40MCAyNC4xMyBMMTkuNTUgMjQuNTUgTDE4LjY4IDI0Ljk0IEwxNy44MCAyNS4zMCBMMTYuOTAgMjUuNjQgTDE2LjAwIDI1Ljk2IEwxNS4xMCAyNi4yNSBMMTQuMjAgMjYuNTEgTDEzLjMyIDI2Ljc0IEwxMi40NSAyNi45NCBMMTEuNjAgMjcuMTEgTDEwLjc4IDI3LjI1IEw5Ljk5IDI3LjM2IEw5LjI0IDI3LjQ0IEw4LjUzIDI3LjQ4IEw3Ljg3IDI3LjUwIEw3LjI2IDI3LjQ4IEw2LjcwIDI3LjQ0IEw2LjE5IDI3LjM2IEw1Ljc1IDI3LjI1IEw1LjM4IDI3LjExIEw1LjA2IDI2Ljk0IEw0LjgyIDI2Ljc0IEw0LjY0IDI2LjUxIEw0LjU0IDI2LjI1IEw0LjUwIDI1Ljk2IEw0LjU0IDI1LjY0IEw0LjY0IDI1LjMwIEw0LjgyIDI0Ljk0IEw1LjA2IDI0LjU1IEw1LjM4IDI0LjEzIEw1Ljc1IDIzLjcwIEw2LjE5IDIzLjI0IEw2LjcwIDIyLjc2IEw3LjI2IDIyLjI2IEw3Ljg3IDIxLjc1IEw4LjUzIDIxLjIyIEw5LjI0IDIwLjY4IEw5Ljk5IDIwLjEyIEwxMC43OCAxOS41NSBMMTEuNjAgMTguOTggTDEyLjQ1IDE4LjM5IEwxMy4zMiAxNy44MCBMMTQuMjAgMTcuMjAgTDE1LjEwIDE2LjYwIEwxNi4wMCAxNi4wMCBMMTYuOTAgMTUuNDAgTDE3LjgwIDE0LjgwIEwxOC42OCAxNC4yMCBMMTkuNTUgMTMuNjEgTDIwLjQwIDEzLjAyIEwyMS4yMiAxMi40NSBMMjIuMDEgMTEuODggTDIyLjc2IDExLjMyIEwyMy40NyAxMC43OCBMMjQuMTMgMTAuMjUgTDI0Ljc0IDkuNzQgTDI1LjMwIDkuMjQgTDI1LjgxIDguNzYgTDI2LjI1IDguMzAgTDI2LjYyIDcuODcgTDI2Ljk0IDcuNDUgTDI3LjE4IDcuMDYgTDI3LjM2IDYuNzAgTDI3LjQ2IDYuMzYgTDI3LjUwIDYuMDQgTDI3LjQ2IDUuNzUgTDI3LjM2IDUuNDkgTDI3LjE4IDUuMjYgTDI2Ljk0IDUuMDYgTDI2LjYyIDQuODkgTDI2LjI1IDQuNzUgTDI1LjgxIDQuNjQgTDI1LjMwIDQuNTYgTDI0Ljc0IDQuNTIgTDI0LjEzIDQuNTAgTDIzLjQ3IDQuNTIgTDIyLjc2IDQuNTYgTDIyLjAxIDQuNjQgTDIxLjIyIDQuNzUgTDIwLjQwIDQuODkgTDE5LjU1IDUuMDYgTDE4LjY4IDUuMjYgTDE3LjgwIDUuNDkgTDE2LjkwIDUuNzUgTDE2LjAwIDYuMDQgTDE1LjEwIDYuMzYgTDE0LjIwIDYuNzAgTDEzLjMyIDcuMDYgTDEyLjQ1IDcuNDUgTDExLjYwIDcuODcgTDEwLjc4IDguMzAgTDkuOTkgOC43NiBMOS4yNCA5LjI0IEw4LjUzIDkuNzQgTDcuODcgMTAuMjUgTDcuMjYgMTAuNzggTDYuNzAgMTEuMzIgTDYuMTkgMTEuODggTDUuNzUgMTIuNDUgTDUuMzggMTMuMDIgTDUuMDYgMTMuNjEgTDQuODIgMTQuMjAgTDQuNjQgMTQuODAgTDQuNTQgMTUuNDAgTDQuNTAgMTYuMDAgTDQuNTQgMTYuNjAgTDQuNjQgMTcuMjAgTDQuODIgMTcuODAgTDUuMDYgMTguMzkgTDUuMzggMTguOTggTDUuNzUgMTkuNTUgTDYuMTkgMjAuMTIgTDYuNzAgMjAuNjggTDcuMjYgMjEuMjIgTDcuODcgMjEuNzUgTDguNTMgMjIuMjYgTDkuMjQgMjIuNzYgTDkuOTkgMjMuMjQgTDEwLjc4IDIzLjcwIEwxMS42MCAyNC4xMyBMMTIuNDUgMjQuNTUgTDEzLjMyIDI0Ljk0IEwxNC4yMCAyNS4zMCBMMTUuMTAgMjUuNjQgTDE2LjAwIDI1Ljk2IEwxNi45MCAyNi4yNSBMMTcuODAgMjYuNTEgTDE4LjY4IDI2Ljc0IEwxOS41NSAyNi45NCBMMjAuNDAgMjcuMTEgTDIxLjIyIDI3LjI1IEwyMi4wMSAyNy4zNiBMMjIuNzYgMjcuNDQgTDIzLjQ3IDI3LjQ4IEwyNC4xMyAyNy41MCBMMjQuNzQgMjcuNDggTDI1LjMwIDI3LjQ0IEwyNS44MSAyNy4zNiBMMjYuMjUgMjcuMjUgTDI2LjYyIDI3LjExIEwyNi45NCAyNi45NCBMMjcuMTggMjYuNzQgTDI3LjM2IDI2LjUxIEwyNy40NiAyNi4yNSBMMjcuNTAgMjUuOTYgTDI3LjQ2IDI1LjY0IEwyNy4zNiAyNS4zMCBMMjcuMTggMjQuOTQgTDI2Ljk0IDI0LjU1IEwyNi42MiAyNC4xMyBMMjYuMjUgMjMuNzAgTDI1LjgxIDIzLjI0IEwyNS4zMCAyMi43NiBMMjQuNzQgMjIuMjYgTDI0LjEzIDIxLjc1IEwyMy40NyAyMS4yMiBMMjIuNzYgMjAuNjggTDIyLjAxIDIwLjEyIEwyMS4yMiAxOS41NSBMMjAuNDAgMTguOTggTDE5LjU1IDE4LjM5IEwxOC42OCAxNy44MCBMMTcuODAgMTcuMjAgTDE2LjkwIDE2LjYwIEwxNi4wMCAxNi4wMCBMMTUuMTAgMTUuNDAgTDE0LjIwIDE0LjgwIEwxMy4zMiAxNC4yMCBMMTIuNDUgMTMuNjEgTDExLjYwIDEzLjAyIEwxMC43OCAxMi40NSBMOS45OSAxMS44OCBMOS4yNCAxMS4zMiBMOC41MyAxMC43OCBMNy44NyAxMC4yNSBMNy4yNiA5Ljc0IEw2LjcwIDkuMjQgTDYuMTkgOC43NiBMNS43NSA4LjMwIEw1LjM4IDcuODcgTDUuMDYgNy40NSBMNC44MiA3LjA2IEw0LjY0IDYuNzAgTDQuNTQgNi4zNiBMNC41MCA2LjA0IEw0LjU0IDUuNzUgTDQuNjQgNS40OSBMNC44MiA1LjI2IEw1LjA2IDUuMDYgTDUuMzggNC44OSBMNS43NSA0Ljc1IEw2LjE5IDQuNjQgTDYuNzAgNC41NiBMNy4yNiA0LjUyIEw3Ljg3IDQuNTAgTDguNTMgNC41MiBMOS4yNCA0LjU2IEw5Ljk5IDQuNjQgTDEwLjc4IDQuNzUgTDExLjYwIDQuODkgTDEyLjQ1IDUuMDYgTDEzLjMyIDUuMjYgTDE0LjIwIDUuNDkgTDE1LjEwIDUuNzUgTDE2LjAwIDYuMDQgTDE2LjkwIDYuMzYgTDE3LjgwIDYuNzAgTDE4LjY4IDcuMDYgTDE5LjU1IDcuNDUgTDIwLjQwIDcuODcgTDIxLjIyIDguMzAgTDIyLjAxIDguNzYgTDIyLjc2IDkuMjQgTDIzLjQ3IDkuNzQgTDI0LjEzIDEwLjI1IEwyNC43NCAxMC43OCBMMjUuMzAgMTEuMzIgTDI1LjgxIDExLjg4IEwyNi4yNSAxMi40NSBMMjYuNjIgMTMuMDIgTDI2Ljk0IDEzLjYxIEwyNy4xOCAxNC4yMCBMMjcuMzYgMTQuODAgTDI3LjQ2IDE1LjQwIEwyNy41MCAxNi4wMCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjZGNhMjNmIiBzdHJva2Utd2lkdGg9IjEuNiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIi8+PC9zdmc+">
 <style>
   :root{
@@ -25,7 +32,7 @@
   .sep{color:var(--txt-faint);margin:0 3px}
 
   /* topbar */
-  .topbar{display:flex;align-items:center;gap:12px;padding:8px 14px;border-bottom:1px solid var(--line);background:var(--bg);flex-shrink:0;min-height:var(--toph)}
+  .topbar{display:flex;align-items:center;gap:12px;padding:8px max(14px,env(safe-area-inset-right)) 8px max(14px,env(safe-area-inset-left));border-bottom:1px solid var(--line);background:var(--bg);flex-shrink:0;min-height:var(--toph)}
   .navtog{color:var(--txt-dim);border:1px solid var(--line);border-radius:3px;width:30px;height:26px;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:.13s}
   .navtog:hover{color:var(--accent);border-color:var(--accent-soft)}
   .brand{display:flex;align-items:center;gap:7px;font-weight:700;letter-spacing:1.5px;font-size:12px;color:var(--txt);text-transform:uppercase;white-space:nowrap}
@@ -97,7 +104,7 @@
   .compose-hint .htag{color:var(--accent);opacity:.85}
 
   /* ideas */
-  .ideas{flex:1;overflow-y:auto;padding:10px 22px 60px}
+  .ideas{flex:1;overflow-y:auto;padding:10px 22px calc(60px + env(safe-area-inset-bottom))}
   .idea{border:1px solid var(--line-soft);border-radius:3px;margin-bottom:6px;background:var(--panel);transition:border-color .1s,background .1s}
   .idea:hover{border-color:var(--line)}
   .idea.expanded{border-color:var(--accent-soft);background:var(--panel-2)}
@@ -185,7 +192,7 @@
     .cats{padding:12px 16px 2px}
     .add-idea{margin:12px 16px 4px}
     .compose-hint{margin:3px 16px 0}
-    .ideas{padding:10px 16px 80px}
+    .ideas{padding:10px 16px calc(80px + env(safe-area-inset-bottom))}
     .idea .check{width:20px;height:20px}
     .idea-row{padding:13px}
     .idea-edit{padding:0 13px 14px 13px}
