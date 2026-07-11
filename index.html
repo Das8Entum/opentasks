@@ -175,6 +175,18 @@
 
   .hidden{display:none!important}
 
+  /* ---- desktop PWA : récupère la barre de titre (Window Controls Overlay) ---- */
+  @media (display-mode: window-controls-overlay){
+    .topbar{
+      -webkit-app-region: drag;
+      padding-left: max(12px, env(titlebar-area-x, 12px));
+      padding-right: max(12px, calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw)));
+    }
+    .topbar .navtog,
+    .topbar .search,
+    .topbar .top-actions{ -webkit-app-region: no-drag; }
+  }
+
   /* ---- mobile ---- */
   @media(max-width:640px){
     body{font-size:14px}
