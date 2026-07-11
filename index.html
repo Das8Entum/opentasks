@@ -58,7 +58,7 @@ const BASES={
   Slate:{bg:'#0d0f13',bg2:'#12151a',surface:'#191d23',surface2:'#151920',line:'#282d35',lineSoft:'#1d2128',lineStrong:'#333a44',text:'#e6ebf1',text2:'#c1c8d2',dim:'#939eb0',dim2:'#77808f',faint:'#59616e'},
   Night:{bg:'#0a0b10',bg2:'#0e1016',surface:'#14161f',surface2:'#111320',line:'#222536',lineSoft:'#191b28',lineStrong:'#2d3145',text:'#e7e9f2',text2:'#c3c6d6',dim:'#9497ac',dim2:'#777a90',faint:'#585b70'},
 };
-const ACCENTS={Amber:{a:'#e6a24e',b:'#57c8bb'},Green:{a:'#63d68a',b:'#e0a34f'},Lime:{a:'#b7e05a',b:'#54cfe0'},Cyan:{a:'#54cfe0',b:'#e0a34f'},Blue:{a:'#6aa3ff',b:'#63d68a'},Violet:{a:'#b58cff',b:'#54cfe0'},Magenta:{a:'#ff73c7',b:'#54cfe0'},Coral:{a:'#ff7a66',b:'#57c8bb'}};
+const ACCENTS={Amber:{a:'#e6a24e',b:'#57c8bb'},Green:{a:'#63d68a',b:'#e0a34f'},Lime:{a:'#b7e05a',b:'#54cfe0'},Cyan:{a:'#54cfe0',b:'#e0a34f'},Blue:{a:'#6aa3ff',b:'#63d68a'},Violet:{a:'#b58cff',b:'#54cfe0'},Magenta:{a:'#ff73c7',b:'#54cfe0'},Coral:{a:'#ff7a66',b:'#57c8bb'},White:{a:'#ffffff',b:'#9a9a9a'}};
 const FONTS={'JetBrains Mono':"'JetBrains Mono',ui-monospace,monospace",'IBM Plex Mono':"'IBM Plex Mono',ui-monospace,monospace",'Space Mono':"'Space Mono',ui-monospace,monospace",'Fira Code':"'Fira Code',ui-monospace,monospace",'Martian Mono':"'Martian Mono',ui-monospace,monospace"};
 function rgba(hex,a){const h=hex.replace('#','');const f=h.length===3?h.split('').map(c=>c+c).join(''):h;const n=parseInt(f,16);return 'rgba('+((n>>16)&255)+','+((n>>8)&255)+','+(n&255)+','+a+')';}
 
