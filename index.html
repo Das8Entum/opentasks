@@ -207,7 +207,8 @@ async function encJSON(obj){const key=await getKey();const iv=crypto.getRandomVa
 async function decJSON(env){const key=await getKey(env.salt);const pt=await crypto.subtle.decrypt({name:"AES-GCM",iv:b64d(env.iv)},key,b64d(env.ct));return JSON.parse(new TextDecoder().decode(pt));}
 async function encBytes(buf){const key=await getKey();const iv=crypto.getRandomValues(new Uint8Array(12));const ct=new Uint8Array(await crypto.subtle.encrypt({name:"AES-GCM",iv},key,buf));const out=new Uint8Array(12+ct.length);out.set(iv,0);out.set(ct,12);return out;}
 async function decBytes(u8){const key=await getKey();const iv=u8.subarray(0,12);const ct=u8.subarray(12);return new Uint8Array(await crypto.subtle.decrypt({name:"AES-GCM",iv},key,ct));}
-function lkBase(){return locker.url.replace(/\/+$/,"");}
+function lkNorm(u){u=(u||"").trim().replace(/\/+$/,"");if(u&&!/^https?:\/\//i.test(u))u="https://"+u;return u;}
+function lkBase(){return lkNorm(locker.url);}
 function lkAuth(){return {Authorization:"Bearer "+locker.token};}
 async function lkPut(k,bytes){const r=await fetch(lkBase()+"/o/"+encodeURIComponent(k),{method:"PUT",headers:lkAuth(),body:bytes});if(!r.ok)throw new Error("PUT "+r.status+" "+(await r.text()).slice(0,120));}
 async function lkGet(k){const r=await fetch(lkBase()+"/o/"+encodeURIComponent(k),{headers:lkAuth()});if(!r.ok)throw new Error("GET "+r.status);return new Uint8Array(await r.arrayBuffer());}
@@ -292,7 +293,7 @@ async function syncConnect(){
   if(pass)localStorage.setItem(ENC_PASS,pass);else localStorage.removeItem(ENC_PASS);
   cryptoKey=null;cloud.err="";
   const lkurl=((document.getElementById('otk-lkurl')||{}).value||"").trim();const lktoken=((document.getElementById('otk-lktoken')||{}).value||"").trim();
-  locker.url=lkurl;locker.token=lktoken;
+  locker.url=lkNorm(lkurl);locker.token=lktoken;
   if(locker.url)localStorage.setItem(LK_URL,locker.url);else localStorage.removeItem(LK_URL);
   if(locker.token)localStorage.setItem(LK_TOKEN,locker.token);else localStorage.removeItem(LK_TOKEN);
   lockerLoaded=false;
