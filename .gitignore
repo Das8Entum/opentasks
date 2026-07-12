@@ -1,0 +1,12 @@
+# Backend — Cloudflare Worker (media Locker). Deployed via the Cloudflare
+# dashboard, must NEVER be served by GitHub Pages. Keep it local-only.
+backend/
+
+# Design sources (not needed by the app)
+Affinity/
+Icones/
+
+# OS / editor junk
+.DS_Store
+Thumbs.db
+*.tmp

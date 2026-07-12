@@ -115,7 +115,7 @@ let settings=loadSettings();
 
 /* ============================ state ============================ */
 let store=load();
-let view={projectId:null,tags:[],search:'',composerIcon:'sine',expanded:{},drawer:false,searchOpen:false,tagsOpen:false,editorTagsOpen:{},titleEdit:null,deskNav:true};
+let view={projectId:null,tags:[],search:'',composerIcon:'sine',expanded:{},drawer:false,searchOpen:false,tagsOpen:false,editorTagsOpen:{},titleEdit:null,deskNav:true,section:'tasks'};
 let subDraft={};
 let picker={open:false,target:null};
 let promptS={open:false,kind:'project',value:''};
@@ -197,6 +197,91 @@ async function cloudPush(){
 function schedulePush(){if(!cloudOn())return;clearTimeout(pushTimer);pushTimer=setTimeout(()=>{pushTimer=null;cloudPush();},900);}
 async function cloudCreate(){const content=encOn()?await encPayload():JSON.stringify(store,null,2);const body={description:"OpenTasks — sync",public:false,files:{}};body.files[GFILE]={content};const r=await fetch("https://api.github.com/gists",{method:"POST",headers:ghHeaders(true),body:JSON.stringify(body)});if(!r.ok)throw new Error("HTTP "+r.status);const g=await r.json();return g.id;}
 
+/* ============================ Locker (E2E media) ============================ */
+const LK_URL="locker.url", LK_TOKEN="locker.token", LK_CHUNK=4*1024*1024;
+const locker={url:localStorage.getItem(LK_URL)||"", token:localStorage.getItem(LK_TOKEN)||""};
+const lockerOn=()=>!!(locker.url&&locker.token);
+const lockerReady=()=>lockerOn()&&cloudOn()&&encOn();
+let lockerIndex=[], lockerLoaded=false, lkUploads={}, lkOpen=null, lkBlobUrl=null, lkText="", lkErr="";
+async function encJSON(obj){const key=await getKey();const iv=crypto.getRandomValues(new Uint8Array(12));const ct=await crypto.subtle.encrypt({name:"AES-GCM",iv},key,new TextEncoder().encode(JSON.stringify(obj)));return JSON.stringify({enc:"v1",salt:encSalt,iv:b64e(iv),ct:b64e(ct)});}
+async function decJSON(env){const key=await getKey(env.salt);const pt=await crypto.subtle.decrypt({name:"AES-GCM",iv:b64d(env.iv)},key,b64d(env.ct));return JSON.parse(new TextDecoder().decode(pt));}
+async function encBytes(buf){const key=await getKey();const iv=crypto.getRandomValues(new Uint8Array(12));const ct=new Uint8Array(await crypto.subtle.encrypt({name:"AES-GCM",iv},key,buf));const out=new Uint8Array(12+ct.length);out.set(iv,0);out.set(ct,12);return out;}
+async function decBytes(u8){const key=await getKey();const iv=u8.subarray(0,12);const ct=u8.subarray(12);return new Uint8Array(await crypto.subtle.decrypt({name:"AES-GCM",iv},key,ct));}
+function lkBase(){return locker.url.replace(/\/+$/,"");}
+function lkAuth(){return {Authorization:"Bearer "+locker.token};}
+async function lkPut(k,bytes){const r=await fetch(lkBase()+"/o/"+encodeURIComponent(k),{method:"PUT",headers:lkAuth(),body:bytes});if(!r.ok)throw new Error("PUT "+r.status+" "+(await r.text()).slice(0,120));}
+async function lkGet(k){const r=await fetch(lkBase()+"/o/"+encodeURIComponent(k),{headers:lkAuth()});if(!r.ok)throw new Error("GET "+r.status);return new Uint8Array(await r.arrayBuffer());}
+async function lkDelObj(k){try{await fetch(lkBase()+"/o/"+encodeURIComponent(k),{method:"DELETE",headers:lkAuth()});}catch(e){}}
+async function lockerPull(){
+  if(!cloudOn()||!encOn())return;
+  try{const r=await fetch("https://api.github.com/gists/"+cloud.id,{headers:ghHeaders()});if(!r.ok)throw new Error("HTTP "+r.status);
+    const g=await r.json();const f=g.files&&g.files["locker.json"];
+    if(f){let c=f.content;if(f.truncated&&f.raw_url)c=await(await fetch(f.raw_url)).text();const p=JSON.parse(c);const data=(p&&p.enc)?await decJSON(p):p;lockerIndex=Array.isArray(data&&data.items)?data.items:[];}
+    else lockerIndex=[];
+    lockerLoaded=true;lkErr="";
+  }catch(e){lkErr=e.name==="OperationError"?"Wrong passphrase.":("Index error: "+e.message);}
+}
+async function lockerPush(){if(!cloudOn()||!encOn())return;const content=await encJSON({items:lockerIndex});const body={files:{}};body.files["locker.json"]={content};const r=await fetch("https://api.github.com/gists/"+cloud.id,{method:"PATCH",headers:ghHeaders(true),body:JSON.stringify(body)});if(!r.ok)throw new Error("index push "+r.status);}
+function guessType(name){const e=(name.split(".").pop()||"").toLowerCase();const m={jpg:"image/jpeg",jpeg:"image/jpeg",png:"image/png",gif:"image/gif",webp:"image/webp",svg:"image/svg+xml",avif:"image/avif",bmp:"image/bmp",mp3:"audio/mpeg",wav:"audio/wav",ogg:"audio/ogg",oga:"audio/ogg",m4a:"audio/mp4",aac:"audio/aac",flac:"audio/flac",mp4:"video/mp4",webm:"video/webm",mov:"video/quicktime",mkv:"video/x-matroska",pdf:"application/pdf",txt:"text/plain",md:"text/markdown",csv:"text/csv",log:"text/plain",json:"application/json"};return m[e]||"";}
+function mediaKind(t,name){t=t||guessType(name);if(t.startsWith("image/"))return "image";if(t.startsWith("audio/"))return "audio";if(t.startsWith("video/"))return "video";if(t==="application/pdf")return "pdf";if(t.startsWith("text/")||t==="application/json")return "text";return "file";}
+function kindIcon(k){return {image:"scope",audio:"sine",video:"triangle",pdf:"square",text:"clock",file:"patch"}[k]||"patch";}
+function fmtSize(b){if(b<1024)return b+" B";if(b<1048576)return (b/1024).toFixed(0)+" KB";if(b<1073741824)return (b/1048576).toFixed(1)+" MB";return (b/1073741824).toFixed(2)+" GB";}
+async function lockerUpload(fileList){
+  const files=[...fileList];if(!files.length)return;
+  if(!lockerReady()){lkErr="Locker needs Sync connected + a passphrase + a Worker URL/token.";render();return;}
+  for(const file of files){
+    const id="f"+uid();const total=Math.max(1,Math.ceil(file.size/LK_CHUNK));
+    lkUploads[id]={name:file.name,done:0,total,err:""};render();
+    try{
+      for(let i=0;i<total;i++){const buf=await file.slice(i*LK_CHUNK,(i+1)*LK_CHUNK).arrayBuffer();await lkPut(id+"/"+i, await encBytes(buf));lkUploads[id].done=i+1;lkProg();}
+      lockerIndex.unshift({id,name:file.name,type:file.type||guessType(file.name),size:file.size,chunks:total,ts:Date.now()});
+      await lockerPush();delete lkUploads[id];render();
+    }catch(e){lkUploads[id].err=String(e.message||e);render();}
+  }
+}
+function lkProg(){document.querySelectorAll(".otk-lkprog").forEach(el=>{const u=lkUploads[el.dataset.id];if(u)el.style.width=Math.round(u.done/u.total*100)+"%";});}
+async function lockerBlob(item){const parts=[];for(let i=0;i<item.chunks;i++)parts.push(await decBytes(await lkGet(item.id+"/"+i)));return new Blob(parts,{type:item.type||"application/octet-stream"});}
+async function lockerOpen(id){const item=lockerIndex.find(x=>x.id===id);if(!item)return;lkOpen=id;lkBlobUrl=null;lkText="";lkErr="";render();
+  try{const blob=await lockerBlob(item);if(mediaKind(item.type,item.name)==="text")lkText=await blob.text();if(lkBlobUrl)URL.revokeObjectURL(lkBlobUrl);lkBlobUrl=URL.createObjectURL(blob);render();}
+  catch(e){lkErr="Decrypt failed: "+(e.message||e);render();}}
+function lockerCloseViewer(){if(lkBlobUrl)URL.revokeObjectURL(lkBlobUrl);lkBlobUrl=null;lkOpen=null;lkText="";render();}
+async function lockerDownload(id){const item=lockerIndex.find(x=>x.id===id);if(!item)return;try{const blob=await lockerBlob(item);const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=item.name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),15000);}catch(e){alert("Download failed: "+(e.message||e));}}
+async function lockerDelete(id){const item=lockerIndex.find(x=>x.id===id);if(!item)return;if(!confirm('Delete "'+item.name+'" from the locker?'))return;for(let i=0;i<item.chunks;i++)lkDelObj(item.id+"/"+i);lockerIndex=lockerIndex.filter(x=>x.id!==id);try{await lockerPush();}catch(e){}render();}
+function setSection(s){view.section=s;view.drawer=false;render();if(s==='locker'&&!lockerLoaded&&cloudOn()&&encOn())lockerPull().then(render);}
+function sectionToggleHTML(){const t=(s,l)=>'<button data-act="setSection" data-s="'+s+'" style="padding:5px 11px;border:none;border-radius:var(--r3);cursor:pointer;font-family:inherit;font-size:10px;letter-spacing:.1em;text-transform:uppercase;background:'+(view.section===s?'var(--accent-soft)':'transparent')+';color:'+(view.section===s?'var(--accent)':'var(--dim2)')+';">'+l+'</button>';return '<div style="display:flex;gap:2px;flex:none;border:1px solid var(--line);border-radius:var(--r3);padding:2px;">'+t('tasks','Tasks')+t('locker','Locker')+'</div>';}
+function lkNotice(title,body){return '<main style="flex:1;display:flex;align-items:center;justify-content:center;text-align:center;padding:40px;"><div style="max-width:320px;color:var(--faint);font-size:12.5px;line-height:1.8;"><div style="color:var(--dim);text-transform:uppercase;letter-spacing:2px;font-size:11px;margin-bottom:10px;">'+title+'</div>'+body+'</div></main>';}
+function lockerMainHTML(mobile){
+  const pad=mobile?'12px':'18px';
+  if(!lockerOn())return lkNotice("Locker not set up","Open <b style=\"color:var(--accent)\">Sync</b> and add your Worker URL + Locker token at the bottom.");
+  if(!cloudOn()||!encOn())return lkNotice("Vault required","The locker reuses your gist + passphrase. Connect <b style=\"color:var(--accent)\">Sync</b> and set a passphrase first.");
+  const up=Object.keys(lkUploads).map(id=>{const u=lkUploads[id];return '<div style="display:flex;align-items:center;gap:9px;padding:8px 11px;border:1px solid var(--line);border-radius:var(--r2);background:var(--surface2);margin-bottom:6px;"><span style="flex:1;min-width:0;font-size:12px;color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">↑ '+esc(u.name)+'</span>'+(u.err?'<span style="font-size:10px;color:#e0705a;">'+esc(u.err)+'</span>':'<div style="width:90px;height:4px;border-radius:2px;background:var(--line);overflow:hidden;flex:none;"><div class="otk-lkprog" data-id="'+id+'" style="height:100%;width:'+Math.round(u.done/u.total*100)+'%;background:var(--accent);transition:width .2s;"></div></div>')+'</div>';}).join('');
+  const items=lockerIndex.map(it=>{const k=mediaKind(it.type,it.name);return '<div style="display:flex;align-items:center;gap:11px;padding:10px 12px;border:1px solid var(--line-soft);border-radius:var(--r2);background:var(--surface2);margin-bottom:7px;">'
+    +'<span data-act="lkOpen" data-id="'+it.id+'" style="display:flex;flex:none;color:var(--accent);cursor:pointer;">'+icon(kindIcon(k),Math.round(20*Math.min(G(),1.3)))+'</span>'
+    +'<div data-act="lkOpen" data-id="'+it.id+'" style="flex:1;min-width:0;cursor:pointer;"><div style="font-size:13px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(it.name)+'</div><div style="font-size:10px;letter-spacing:.05em;text-transform:uppercase;color:var(--faint);margin-top:2px;">'+fmtSize(it.size)+' · '+esc(fmtDate(it.ts))+'</div></div>'
+    +'<button data-act="lkDownload" data-id="'+it.id+'" title="Download" style="display:flex;flex:none;padding:6px;border:none;background:transparent;color:var(--dim2);cursor:pointer;border-radius:var(--r3);">'+icon('gain',15)+'</button>'
+    +'<button data-act="lkDelete" data-id="'+it.id+'" title="Delete" style="display:flex;flex:none;padding:6px;border:none;background:transparent;color:var(--dim2);cursor:pointer;border-radius:var(--r3);">'+icon('trash',15)+'</button></div>';}).join('');
+  const dz='<div id="otk-dz" data-act="lkPick" style="display:flex;align-items:center;justify-content:center;gap:10px;padding:16px;border:1px dashed var(--line-strong);border-radius:var(--r1);background:var(--surface);cursor:pointer;margin-bottom:12px;color:var(--dim);"><span style="display:flex;color:var(--accent);">'+icon('plus',18)+'</span><span style="font-size:12px;">'+(mobile?'Add files':'Drop files here, or click to add')+'</span></div><input id="otk-file" type="file" multiple style="display:none;" />';
+  const empty=(lockerIndex.length||Object.keys(lkUploads).length||lkErr)?'':'<div style="padding:30px 10px;text-align:center;color:var(--faint);font-size:12px;line-height:1.7;">Locker is empty.<br/>Add a file — it uploads encrypted and appears on your other devices.</div>';
+  const errHtml=lkErr?'<div style="padding:9px 11px;border:1px solid #5a3230;border-radius:var(--r2);background:rgba(224,90,70,.1);color:#e0705a;font-size:11px;margin-bottom:10px;">'+esc(lkErr)+'</div>':'';
+  return '<main style="flex:1;min-width:0;display:flex;flex-direction:column;overflow:hidden;">'
+    +'<div style="display:flex;align-items:center;gap:10px;padding:13px '+pad+' 10px;flex:none;"><span style="color:var(--accent);display:flex;">'+icon('patch',Math.round(18*Math.min(G(),1.3)))+'</span><h1 style="margin:0;font-size:16px;font-weight:700;letter-spacing:.01em;color:var(--text);flex:1;text-transform:var(--tt);">Locker</h1><span style="font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--faint);">'+lockerIndex.length+' file'+(lockerIndex.length===1?'':'s')+'</span></div>'
+    +'<div style="flex:1;overflow-y:auto;padding:0 '+pad+' 20px;">'+errHtml+dz+up+items+empty+'</div></main>';
+}
+function lockerViewerHTML(){
+  if(!lkOpen)return '';
+  const item=lockerIndex.find(x=>x.id===lkOpen);const k=item?mediaKind(item.type,item.name):'file';
+  let inner;
+  if(lkErr)inner='<div style="color:#e0705a;padding:30px;font-size:12px;max-width:400px;text-align:center;">'+esc(lkErr)+'</div>';
+  else if(!lkBlobUrl)inner='<div style="padding:40px;color:var(--dim);font-size:12px;">Decrypting…</div>';
+  else if(k==='image')inner='<img src="'+lkBlobUrl+'" style="max-width:100%;max-height:78vh;display:block;border-radius:var(--r2);" />';
+  else if(k==='audio')inner='<audio controls autoplay src="'+lkBlobUrl+'" style="width:min(80vw,520px);"></audio>';
+  else if(k==='video')inner='<video controls autoplay src="'+lkBlobUrl+'" style="max-width:100%;max-height:78vh;border-radius:var(--r2);"></video>';
+  else if(k==='pdf')inner='<iframe src="'+lkBlobUrl+'" style="width:min(90vw,900px);height:80vh;border:none;border-radius:var(--r2);background:#fff;"></iframe>';
+  else if(k==='text')inner='<pre style="width:min(80vw,720px);max-height:78vh;overflow:auto;white-space:pre-wrap;word-break:break-word;font-family:inherit;font-size:12.5px;line-height:1.6;color:var(--text2);margin:0;background:var(--surface2);border:1px solid var(--line);border-radius:var(--r2);padding:14px;">'+esc(lkText)+'</pre>';
+  else inner='<div style="padding:30px;text-align:center;color:var(--dim);font-size:12px;">No preview for this type.<br/><button data-act="lkDownload" data-id="'+lkOpen+'" style="margin-top:12px;padding:8px 16px;border:1px solid var(--accent-soft);border-radius:var(--r2);background:transparent;color:var(--accent);cursor:pointer;font-family:inherit;">Download</button></div>';
+  return '<div data-act="lkCloseViewer" style="position:fixed;inset:0;z-index:70;background:rgba(6,5,4,.85);display:flex;align-items:center;justify-content:center;padding:20px;"><div data-act="stop" style="max-width:100%;max-height:100%;display:flex;flex-direction:column;gap:10px;"><div style="display:flex;align-items:center;gap:10px;color:var(--text);"><span style="flex:1;min-width:0;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(item?item.name:'')+'</span>'+(item?'<button data-act="lkDownload" data-id="'+lkOpen+'" title="Download" style="display:flex;padding:6px;border:none;background:transparent;color:var(--dim);cursor:pointer;">'+icon('gain',16)+'</button>':'')+'<button data-act="lkCloseViewer" title="Close" style="display:flex;padding:6px;border:none;background:transparent;color:var(--dim);cursor:pointer;">'+icon('x',18)+'</button></div><div style="display:flex;align-items:center;justify-content:center;overflow:auto;">'+inner+'</div></div></div>';
+}
+
 let syncOpen=false;
 function openSync(){syncOpen=true;render();}
 function closeSync(){syncOpen=false;render();}
@@ -206,6 +291,11 @@ async function syncConnect(){
   cloud.token=tok.trim();localStorage.setItem(CFG_TOKEN,cloud.token);
   if(pass)localStorage.setItem(ENC_PASS,pass);else localStorage.removeItem(ENC_PASS);
   cryptoKey=null;cloud.err="";
+  const lkurl=((document.getElementById('otk-lkurl')||{}).value||"").trim();const lktoken=((document.getElementById('otk-lktoken')||{}).value||"").trim();
+  locker.url=lkurl;locker.token=lktoken;
+  if(locker.url)localStorage.setItem(LK_URL,locker.url);else localStorage.removeItem(LK_URL);
+  if(locker.token)localStorage.setItem(LK_TOKEN,locker.token);else localStorage.removeItem(LK_TOKEN);
+  lockerLoaded=false;
   try{
     if(gid){cloud.id=gid;localStorage.setItem(CFG_ID,gid);if(st)st.textContent="Connecting…";const ok=await cloudPull();
       if(!ok){if(st){st.textContent=cloud.err||"Failed — check token / ID.";st.style.color="#e0705a";}return;}
@@ -240,7 +330,7 @@ function filteredTasks(proj){
 }
 
 /* ============================ handlers ============================ */
-function selectProject(id){view.projectId=id;view.tags=[];view.search='';view.drawer=false;view.expanded={};view.titleEdit=null;render();}
+function selectProject(id){view.projectId=id;view.tags=[];view.search='';view.drawer=false;view.expanded={};view.titleEdit=null;view.section='tasks';render();}
 function selectTag(id){if(id==='ALL'){view.tags=[];}else{const i=view.tags.indexOf(id);if(i>=0)view.tags.splice(i,1);else view.tags.push(id);}render();}
 function toggleTags(){view.tagsOpen=!view.tagsOpen;render();}
 function toggleEditorTags(id){view.editorTagsOpen[id]=!view.editorTagsOpen[id];render();}
@@ -377,10 +467,11 @@ function renderDesktop(){
   const header='<header class="otk-topbar" style="position:relative;display:flex;align-items:center;gap:13px;height:46px;padding:0 14px;border-bottom:1px solid var(--line);flex:none;">'
     +'<button data-act="toggleDeskNav" title="Projects panel" style="display:flex;align-items:center;justify-content:center;width:30px;height:30px;flex:none;border:1px solid transparent;border-radius:var(--r2);background:transparent;color:var(--dim2);cursor:pointer;">'+icon('menu',18)+'</button>'
     +'<span style="display:flex;align-items:center;gap:8px;flex:none;color:var(--text);"><svg width="18" height="18" viewBox="0 0 100 100" shape-rendering="crispEdges" style="display:block;flex:none;"><rect x="22" y="23" width="32" height="9" fill="currentColor"/><rect x="22" y="38" width="32" height="9" fill="currentColor"/><rect x="22" y="53" width="32" height="9" fill="currentColor"/><rect x="36" y="68" width="37" height="9" fill="currentColor"/><rect x="62" y="22" width="11" height="11" fill="#63d68a"/></svg><span style="font-size:12.5px;font-weight:700;letter-spacing:.16em;font-family:\'IBM Plex Mono\',ui-monospace,monospace;">OPENTASKS</span></span>'
-    +'<span class="otk-sep" style="width:1px;height:18px;background:var(--line);flex:none;"></span>'
-    +'<span class="otk-stats" style="font-size:10.5px;letter-spacing:.06em;color:var(--faint);text-transform:uppercase;white-space:nowrap;">P'+gProj+' · T'+gTasks+' · ○'+gOpen+'</span>'
+    +sectionToggleHTML()
+    +(view.section==='tasks'?('<span class="otk-sep" style="width:1px;height:18px;background:var(--line);flex:none;"></span><span class="otk-stats" style="font-size:10.5px;letter-spacing:.06em;color:var(--faint);text-transform:uppercase;white-space:nowrap;">P'+gProj+' · T'+gTasks+' · ○'+gOpen+'</span>'):'')
     +'<span style="flex:1"></span>'
-    +'<div class="otk-search" style="'+searchStyle+'"><span style="color:var(--faint);display:flex;flex:none;">'+icon('search',15)+'</span><input id="otk-search" value="'+esc(view.search)+'" placeholder="Search…" style="flex:1;min-width:0;background:transparent;border:none;outline:none;font-family:inherit;font-size:12px;color:var(--text2);" /></div></header>';
+    +(view.section==='tasks'?('<div class="otk-search" style="'+searchStyle+'"><span style="color:var(--faint);display:flex;flex:none;">'+icon('search',15)+'</span><input id="otk-search" value="'+esc(view.search)+'" placeholder="Search…" style="flex:1;min-width:0;background:transparent;border:none;outline:none;font-family:inherit;font-size:12px;color:var(--text2);" /></div>'):'')
+    +'</header>';
   const sidebar=view.deskNav?('<aside style="width:210px;flex:none;border-right:1px solid var(--line);background:var(--bg2);display:flex;flex-direction:column;">'
     +'<div style="display:flex;align-items:center;justify-content:space-between;padding:13px 12px 8px;"><span style="font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--faint);">Projects</span><button data-act="addProject" title="New project" style="display:flex;align-items:center;justify-content:center;width:22px;height:22px;border:1px solid var(--line);border-radius:0;background:transparent;color:var(--dim2);cursor:pointer;">'+icon('plus',15)+'</button></div>'
     +'<div style="flex:1;overflow-y:auto;padding:2px 8px;">'+(projRows||'<div style="padding:12px;color:var(--faint);font-size:11px;line-height:1.6;">No projects.<br/>Click ＋.</div>')+'</div>'
@@ -388,7 +479,8 @@ function renderDesktop(){
     +'<button data-act="openSync" style="display:flex;align-items:center;gap:9px;padding:11px 13px;width:100%;text-align:left;border:none;border-top:1px solid var(--line-soft);background:transparent;cursor:pointer;font-family:inherit;"><span class="otk-syncdot" style="width:6px;height:6px;border-radius:50%;flex:none;"></span><span class="otk-synclabel" style="font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);">Sync</span></button>'
     +'<div style="padding:8px 13px 10px;display:flex;align-items:center;gap:7px;"><span style="width:6px;height:6px;border-radius:50%;background:var(--accent2);flex:none;"></span><span style="font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint);">Local · offline</span></div></aside>'):'';
   let main;
-  if(!proj){main='<main style="flex:1;display:flex;align-items:center;justify-content:center;text-align:center;padding:40px;"><div style="color:var(--faint);font-size:12.5px;line-height:1.8;">No project.<br/>Open the panel (☰) and hit ＋,<br/>or connect your gist via <b style="color:var(--accent)">Sync</b>.</div></main>';}
+  if(view.section==='locker'){main=lockerMainHTML(false);}
+  else if(!proj){main='<main style="flex:1;display:flex;align-items:center;justify-content:center;text-align:center;padding:40px;"><div style="color:var(--faint);font-size:12.5px;line-height:1.8;">No project.<br/>Open the panel (☰) and hit ＋,<br/>or connect your gist via <b style="color:var(--accent)">Sync</b>.</div></main>';}
   else{const projTasks=store.tasks.filter(t=>t.projectId===proj.id);
     main='<main style="flex:1;min-width:0;display:flex;flex-direction:column;">'
       +'<div style="display:flex;align-items:center;gap:10px;padding:13px 18px 10px;flex:none;"><span style="color:var(--accent);display:flex;flex:none;">'+icon(proj.icon,Math.round(18*Math.min(g,1.3)))+'</span><h1 style="margin:0;font-size:16px;font-weight:700;letter-spacing:.01em;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0;text-transform:var(--tt);">'+esc(proj.name)+'</h1>'+filterButtonHTML(proj)+'</div>'
@@ -427,24 +519,25 @@ function tileListHTML(){
   return h;
 }
 function renderMobile(){
-  const g=G();const proj=currentProject();const tById=tagMap();
+  const g=G();const proj=currentProject();const tById=tagMap();const loc=view.section==='locker';
   const spacer='<div style="height:max(8px,env(safe-area-inset-top));flex:none;"></div>';
   const header='<header style="flex:none;display:flex;align-items:center;gap:10px;padding:2px 10px 10px;">'
-    +'<button data-act="openDrawer" title="Projects" style="display:flex;align-items:center;justify-content:center;width:40px;height:40px;flex:none;border:none;border-radius:var(--r2);background:transparent;color:var(--dim);cursor:pointer;">'+icon('menu',18)+'</button>'
-    +'<span style="color:var(--accent);display:flex;flex:none;">'+icon(proj?proj.icon:'sine',Math.round(18*Math.min(g,1.3)))+'</span>'
-    +'<span style="flex:1;min-width:0;font-size:16px;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-transform:var(--tt);">'+esc(proj?proj.name:'OpenTasks')+'</span>'
-    +'<button data-act="toggleSearch" title="Search" style="display:flex;align-items:center;justify-content:center;width:40px;height:40px;flex:none;border:none;border-radius:var(--r2);background:transparent;color:var(--dim);cursor:pointer;">'+icon('search',15)+'</button></header>';
-  const searchRow=view.searchOpen?'<div style="flex:none;padding:0 12px 10px;"><div style="display:flex;align-items:center;gap:8px;padding:9px 12px;border:1px solid var(--line);border-radius:var(--r2);background:var(--bg2);"><span style="color:var(--faint);display:flex;">'+icon('search',15)+'</span><input id="otk-search" value="'+esc(view.search)+'" placeholder="Search…" style="flex:1;min-width:0;background:transparent;border:none;outline:none;font-family:inherit;font-size:14px;color:var(--text);" /></div></div>':'';
+    +'<button data-act="openDrawer" title="Menu" style="display:flex;align-items:center;justify-content:center;width:40px;height:40px;flex:none;border:none;border-radius:var(--r2);background:transparent;color:var(--dim);cursor:pointer;">'+icon('menu',18)+'</button>'
+    +'<span style="color:var(--accent);display:flex;flex:none;">'+icon(loc?'patch':(proj?proj.icon:'sine'),Math.round(18*Math.min(g,1.3)))+'</span>'
+    +'<span style="flex:1;min-width:0;font-size:16px;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-transform:var(--tt);">'+(loc?'Locker':esc(proj?proj.name:'OpenTasks'))+'</span>'
+    +(loc?'':'<button data-act="toggleSearch" title="Search" style="display:flex;align-items:center;justify-content:center;width:40px;height:40px;flex:none;border:none;border-radius:var(--r2);background:transparent;color:var(--dim);cursor:pointer;">'+icon('search',15)+'</button>')+'</header>';
+  const searchRow=(!loc&&view.searchOpen)?'<div style="flex:none;padding:0 12px 10px;"><div style="display:flex;align-items:center;gap:8px;padding:9px 12px;border:1px solid var(--line);border-radius:var(--r2);background:var(--bg2);"><span style="color:var(--faint);display:flex;">'+icon('search',15)+'</span><input id="otk-search" value="'+esc(view.search)+'" placeholder="Search…" style="flex:1;min-width:0;background:transparent;border:none;outline:none;font-family:inherit;font-size:14px;color:var(--text);" /></div></div>':'';
   const projTasks=proj?store.tasks.filter(t=>t.projectId===proj.id):[];
-  const filterRow=proj?('<div style="flex:none;padding:0 12px 10px;">'+filterButtonHTML(proj)+(view.tagsOpen?'<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:9px;">'+tagBarHTML(proj,projTasks,false)+'</div>':'')+'</div>'):'';
-  const composer=proj?('<div style="flex:none;padding:0 12px 11px;"><div style="display:flex;align-items:center;gap:8px;padding:8px 9px;border:1px solid var(--line);border-radius:var(--r1);background:var(--surface);"><button data-act="pickerFor" data-kind="composer" title="Task icon" style="display:flex;align-items:center;justify-content:center;width:34px;height:34px;flex:none;border:1px solid var(--line-strong);border-radius:var(--r2);background:var(--bg);color:var(--accent);cursor:pointer;">'+icon(view.composerIcon,20)+'</button><textarea id="otk-composer" rows="1" placeholder="New task…" spellcheck="false" style="flex:1;min-width:0;resize:none;min-height:20px;max-height:110px;background:transparent;border:none;outline:none;font-family:inherit;font-size:14px;line-height:1.5;color:var(--text);"></textarea><button data-act="addTask" style="align-self:stretch;flex:none;padding:0 14px;border:none;border-radius:var(--r2);background:var(--accent);color:var(--bg);font-family:inherit;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;cursor:pointer;">Add</button></div></div>'):'';
-  const body='<div id="otk-list" style="flex:1;min-height:0;overflow-y:auto;padding:4px 0 calc(20px + env(safe-area-inset-bottom));">'+tileListHTML()+'</div>';
+  const filterRow=(!loc&&proj)?('<div style="flex:none;padding:0 12px 10px;">'+filterButtonHTML(proj)+(view.tagsOpen?'<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:9px;">'+tagBarHTML(proj,projTasks,false)+'</div>':'')+'</div>'):'';
+  const composer=(!loc&&proj)?('<div style="flex:none;padding:0 12px 11px;"><div style="display:flex;align-items:center;gap:8px;padding:8px 9px;border:1px solid var(--line);border-radius:var(--r1);background:var(--surface);"><button data-act="pickerFor" data-kind="composer" title="Task icon" style="display:flex;align-items:center;justify-content:center;width:34px;height:34px;flex:none;border:1px solid var(--line-strong);border-radius:var(--r2);background:var(--bg);color:var(--accent);cursor:pointer;">'+icon(view.composerIcon,20)+'</button><textarea id="otk-composer" rows="1" placeholder="New task…" spellcheck="false" style="flex:1;min-width:0;resize:none;min-height:20px;max-height:110px;background:transparent;border:none;outline:none;font-family:inherit;font-size:14px;line-height:1.5;color:var(--text);"></textarea><button data-act="addTask" style="align-self:stretch;flex:none;padding:0 14px;border:none;border-radius:var(--r2);background:var(--accent);color:var(--bg);font-family:inherit;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;cursor:pointer;">Add</button></div></div>'):'';
+  const body=loc?lockerMainHTML(true):('<div id="otk-list" style="flex:1;min-height:0;overflow-y:auto;padding:4px 0 calc(20px + env(safe-area-inset-bottom));">'+tileListHTML()+'</div>');
   let overlays='';
   if(view.drawer){let pr='';store.projects.forEach(p=>{const active=p&&proj&&p.id===proj.id;const cnt=store.tasks.filter(t=>t.projectId===p.id&&!t.done).length;pr+='<div data-act="selectProject" data-id="'+p.id+'" style="display:flex;align-items:center;gap:9px;padding:11px 8px;border-radius:0;cursor:pointer;margin-bottom:2px;'+(active?'background:var(--accent-dim);box-shadow:inset 2px 0 0 var(--accent);':'')+'"><span data-act="pickerFor" data-kind="project" data-id="'+p.id+'" style="display:flex;flex:none;padding:2px;cursor:pointer;color:'+(active?'var(--accent)':'var(--dim2)')+';">'+icon(p.icon,Math.round(15*Math.min(g,1.3)))+'</span><div style="display:flex;flex-direction:column;min-width:0;flex:1;gap:1px;"><span style="font-size:8.5px;letter-spacing:.12em;color:var(--faint);">'+esc(p.code)+'</span><span style="font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;'+(active?'font-weight:600;color:var(--text);':'color:var(--dim);')+'">'+esc(p.name)+'</span></div><span style="font-size:10px;flex:none;color:'+(active?'var(--accent)':'var(--faint)')+';">'+cnt+'</span></div>';});
     overlays+='<div data-act="closeDrawer" style="position:absolute;inset:0;z-index:30;background:rgba(0,0,0,.55);"></div>'
       +'<aside style="position:absolute;top:0;left:0;bottom:0;z-index:31;width:80%;max-width:300px;background:var(--bg2);border-right:1px solid var(--line);display:flex;flex-direction:column;box-shadow:0 0 40px rgba(0,0,0,.5);"><div style="height:max(8px,env(safe-area-inset-top));flex:none;"></div>'
       +'<div style="display:flex;align-items:center;justify-content:space-between;padding:12px 14px 10px;"><span style="font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--faint);">Projects</span><button data-act="addProject" style="display:flex;align-items:center;justify-content:center;width:30px;height:30px;border:1px solid var(--line);border-radius:0;background:transparent;color:var(--dim);cursor:pointer;">'+icon('plus',15)+'</button></div>'
       +'<div style="flex:1;overflow-y:auto;padding:2px 10px;">'+(pr||'<div style="padding:12px;color:var(--faint);font-size:11px;">No projects.</div>')+'</div>'
+      +'<button data-act="setSection" data-s="locker" style="display:flex;align-items:center;gap:9px;padding:13px 16px;border:none;border-top:1px solid var(--line-soft);background:'+(loc?'var(--accent-dim)':'transparent')+';color:'+(loc?'var(--accent)':'var(--dim)')+';cursor:pointer;font-family:inherit;"><span style="display:flex;">'+icon('patch',16)+'</span><span style="font-size:11px;letter-spacing:.04em;">Locker</span></button>'
       +'<button data-act="openSettings" style="display:flex;align-items:center;gap:9px;padding:13px 16px;border:none;border-top:1px solid var(--line-soft);background:transparent;color:var(--dim);cursor:pointer;font-family:inherit;"><span style="display:flex;">'+icon('sliders',16)+'</span><span style="font-size:11px;letter-spacing:.04em;">Settings</span></button>'
       +'<button data-act="openSync" style="display:flex;align-items:center;gap:9px;padding:13px 16px;border:none;border-top:1px solid var(--line-soft);background:transparent;cursor:pointer;"><span class="otk-syncdot" style="width:6px;height:6px;border-radius:50%;flex:none;"></span><span style="font-size:11px;letter-spacing:.04em;color:var(--dim);">Sync — GitHub Gist</span></button>'
       +'<div style="padding:0 16px calc(20px + env(safe-area-inset-bottom));display:flex;align-items:center;gap:7px;"><span class="otk-syncdot" style="width:6px;height:6px;border-radius:50%;flex:none;"></span><span style="font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint);">Local · offline</span></div></aside>';
@@ -465,9 +558,11 @@ function modalsHTML(){
     +'<label style="display:block;font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--faint);margin-bottom:5px;">Gist ID (empty = create)</label><input id="otk-gist" value="'+esc(cloud.id)+'" placeholder="—" style="width:100%;margin-bottom:12px;background:var(--bg);border:1px solid var(--line);border-radius:var(--r2);padding:9px 11px;font-family:inherit;font-size:12.5px;color:var(--text);outline:none;" />'
     +'<label style="display:block;font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--faint);margin-bottom:5px;">Passphrase (vault — empty = unencrypted)</label><input id="otk-pass" type="password" value="'+esc(encPass())+'" placeholder="end-to-end encryption" style="width:100%;margin-bottom:6px;background:var(--bg);border:1px solid var(--line);border-radius:var(--r2);padding:9px 11px;font-family:inherit;font-size:12.5px;color:var(--text);outline:none;" />'
     +'<p style="margin:0 0 13px;font-size:10px;line-height:1.6;color:var(--faint);">If set, your notes are encrypted (AES-256) before upload. Same passphrase on every device. Lost = unrecoverable.</p>'
+    +'<div style="border-top:1px solid var(--line-soft);margin:2px 0 13px;padding-top:13px;"><label style="display:block;font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--faint);margin-bottom:5px;">Locker — Worker URL (media, optional)</label><input id="otk-lkurl" value="'+esc(locker.url)+'" placeholder="https://….workers.dev" style="width:100%;margin-bottom:10px;background:var(--bg);border:1px solid var(--line);border-radius:var(--r2);padding:9px 11px;font-family:inherit;font-size:12.5px;color:var(--text);outline:none;" /><label style="display:block;font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--faint);margin-bottom:5px;">Locker token</label><input id="otk-lktoken" type="password" value="'+esc(locker.token)+'" placeholder="LOCKER_TOKEN" style="width:100%;background:var(--bg);border:1px solid var(--line);border-radius:var(--r2);padding:9px 11px;font-family:inherit;font-size:12.5px;color:var(--text);outline:none;" /></div>'
     +'<div id="otk-syncstatus" style="font-size:10.5px;letter-spacing:.04em;color:var(--dim2);margin-bottom:12px;min-height:14px;">'+(cloud.err?esc(cloud.err):(connected?'Connected · Gist '+esc(cloud.id.slice(0,10))+(encOn()?' · encrypted':''):'Not connected'))+'</div>'
     +'<div style="display:flex;align-items:center;gap:8px;"><span style="flex:1"></span>'+(connected?'<button data-act="syncDisconnect" style="padding:8px 13px;border:1px solid var(--line-strong);border-radius:var(--r2);background:transparent;color:var(--dim);font-family:inherit;font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;cursor:pointer;">Disconnect</button>':'')+'<button data-act="syncConnect" style="padding:8px 16px;border:none;border-radius:var(--r2);background:var(--accent);color:var(--bg);font-family:inherit;font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;cursor:pointer;">'+(connected?'Reconnect':'Connect')+'</button></div></div></div>';}
   if(settingsOpen)h+=settingsHTML();
+  h+=lockerViewerHTML();
   return h;
 }
 function segRow(label,key,opts){let b='';opts.forEach(o=>{const active=settings[key]===o;b+='<button data-act="setSetting" data-key="'+key+'" data-val="'+esc(o)+'" style="padding:6px 11px;border-radius:var(--r3);border:1px solid '+(active?'var(--accent-line)':'var(--line)')+';background:'+(active?'var(--accent-soft)':'var(--bg)')+';color:'+(active?'var(--accent)':'var(--dim)')+';font-family:inherit;font-size:11px;cursor:pointer;">'+esc(o)+'</button>';});return '<div style="margin-bottom:14px;"><div style="font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--faint);margin-bottom:7px;">'+label+'</div><div style="display:flex;flex-wrap:wrap;gap:6px;">'+b+'</div></div>';}
@@ -497,6 +592,8 @@ function attachInputs(scope){
     const gl=document.getElementById('otk-glyph');if(gl){gl.addEventListener('input',()=>{const v=document.getElementById('otk-glyphval');if(v)v.textContent=parseFloat(gl.value).toFixed(2)+'×';});gl.addEventListener('change',()=>setSetting('glyphes',gl.value));}
     if(_focusSub){const si=document.querySelector('.otk-subdraft[data-id="'+_focusSub+'"]');_focusSub=null;if(si)si.focus();}
     if(view.titleEdit){const tt=document.querySelector('.otk-title[data-id="'+view.titleEdit+'"]');if(tt){tt.focus();const L=tt.value.length;try{tt.setSelectionRange(L,L);}catch(e){}}}
+    const fi=document.getElementById('otk-file');if(fi)fi.addEventListener('change',()=>{lockerUpload(fi.files);fi.value='';});
+    const dz=document.getElementById('otk-dz');if(dz){dz.addEventListener('dragover',e=>{e.preventDefault();dz.style.borderColor='var(--accent)';});dz.addEventListener('dragleave',()=>{dz.style.borderColor='';});dz.addEventListener('drop',e=>{e.preventDefault();dz.style.borderColor='';if(e.dataTransfer&&e.dataTransfer.files)lockerUpload(e.dataTransfer.files);});}
   }
 }
 document.getElementById('app').addEventListener('click',e=>{
@@ -532,6 +629,12 @@ document.getElementById('app').addEventListener('click',e=>{
     case 'closeSettings':settingsOpen=false;render();break;
     case 'setSetting':setSetting(d.key,d.val);break;
     case 'toggleDeskNav':view.deskNav=!view.deskNav;render();break;
+    case 'setSection':setSection(d.s);break;
+    case 'lkPick':{const fi=document.getElementById('otk-file');if(fi)fi.click();break;}
+    case 'lkOpen':lockerOpen(d.id);break;
+    case 'lkDownload':lockerDownload(d.id);break;
+    case 'lkDelete':lockerDelete(d.id);break;
+    case 'lkCloseViewer':lockerCloseViewer();break;
   }
 });
 document.getElementById('app').addEventListener('contextmenu',e=>{const el=e.target.closest('[data-act=selectProject]');if(el){e.preventDefault();deleteProject(el.dataset.id);}});
@@ -539,11 +642,13 @@ document.getElementById('app').addEventListener('contextmenu',e=>{const el=e.tar
 /* ============================ startup ============================ */
 render();
 if(cloudOn())cloudPull();
+if(cloudOn()&&encOn())lockerPull().then(()=>{if(view.section==='locker')render();});
 let _wasMobile=isMobile();
 MOBILE_Q.addEventListener('change',()=>{_wasMobile=isMobile();render();});
 window.addEventListener('resize',()=>{if(isMobile()!==_wasMobile){_wasMobile=isMobile();render();}});
 function canAutoPull(){if(!cloudOn()||pushTimer||!navigator.onLine)return false;if(picker.open||promptS.open||syncOpen||settingsOpen)return false;const a=document.activeElement,t=a&&a.tagName;if(t==='TEXTAREA')return false;if(t==='INPUT'&&(a.value||'').trim())return false;return true;}
 setInterval(()=>{if(canAutoPull())cloudPull();},45000);
+setInterval(()=>{if(view.section==='locker'&&lockerReady()&&!Object.keys(lkUploads).length&&!lkOpen){const b=lockerIndex.map(i=>i.id).join(',');lockerPull().then(()=>{if(lockerIndex.map(i=>i.id).join(',')!==b)render();});}},5000);
 window.addEventListener('online',()=>{if(cloudOn())cloudPull();});
 })();
 </script>
