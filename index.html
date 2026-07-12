@@ -92,6 +92,20 @@ const GLYPHS={
   trash:[['path',{d:'M4 7 H20 M9 7 V5 H15 V7 M6.5 7 L7.5 20 H16.5 L17.5 7'}]],
   sliders:[['path',{d:'M4 7H20'}],['path',{d:'M4 12H20'}],['path',{d:'M4 17H20'}],['circle',{cx:9,cy:7,r:2.2}],['circle',{cx:15,cy:12,r:2.2}],['circle',{cx:8,cy:17,r:2.2}]],
   pencil:[['path',{d:'M5 19 L5 15.5 L15.5 5 L18.5 8 L8 18.5 Z'}],['path',{d:'M13.5 7 L16.5 10'}]],
+  wave:[['path',{d:'M3 12 V12 M5 9 V15 M7 6 V18 M9 10 V14 M11 4 V20 M13 8 V16 M15 11 V13 M17 7 V17 M19 10 V14 M21 12 V12'}]],
+  image:[['rect',{x:3.5,y:5,width:17,height:14,rx:2}],['circle',{cx:8.5,cy:10,r:1.7}],['path',{d:'M4.5 17 L10 12 L13 15 L16.5 11.5 L19.5 15'}]],
+  text:[['path',{d:'M6 6 H18 M6 10 H18 M6 14 H15 M6 18 H12'}]],
+  video:[['rect',{x:3.5,y:6,width:17,height:12,rx:2}],['path',{d:'M10 9.4 L15 12 L10 14.6 Z',fill:'currentColor',stroke:'none'}]],
+  doc:[['path',{d:'M6.5 3.5 H14 L17.5 7 V20.5 H6.5 Z'}],['path',{d:'M14 3.5 V7 H17.5'}],['path',{d:'M9 13 H15 M9 16.5 H13'}]],
+  code:[['path',{d:'M9 8 L5 12 L9 16 M15 8 L19 12 L15 16'}]],
+  archive:[['rect',{x:4,y:5,width:16,height:15,rx:1.5}],['path',{d:'M4 9.5 H20 M11 5 V9.5 M10.4 13 H11.6'}]],
+  play:[['path',{d:'M7 5 L18 12 L7 19 Z',fill:'currentColor',stroke:'none'}]],
+  pause:[['path',{d:'M8.5 5 V19 M15.5 5 V19'}]],
+  upload:[['path',{d:'M12 20 V8 M7 13 L12 8 L17 13 M5 4.5 H19'}]],
+  download:[['path',{d:'M12 4 V16 M7 11.5 L12 16.5 L17 11.5 M5 20 H19'}]],
+  link:[['path',{d:'M10.5 13.5 L13.5 10.5 M9.5 7.5 L11 6 A2.8 2.8 0 0 1 18 10.5 L16.5 12 M7.5 12 L6 13.5 A2.8 2.8 0 0 0 12.5 18 L14 16.5'}]],
+  grid:[['rect',{x:4,y:4,width:6.5,height:6.5,rx:1}],['rect',{x:13.5,y:4,width:6.5,height:6.5,rx:1}],['rect',{x:4,y:13.5,width:6.5,height:6.5,rx:1}],['rect',{x:13.5,y:13.5,width:6.5,height:6.5,rx:1}]],
+  expand:[['path',{d:'M4 9 V4 H9 M15 4 H20 V9 M20 15 V20 H15 M9 20 H4 V15'}]],
 };
 function svgAttrs(o){return Object.keys(o).map(k=>k+'="'+o[k]+'"').join(' ');}
 function icon(key,size){const shapes=GLYPHS[key]||GLYPHS.sine;const inner=shapes.map(sp=>'<'+sp[0]+' '+svgAttrs(sp[1])+'/>').join('');return '<svg width="'+size+'" height="'+size+'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="display:block;flex:none">'+inner+'</svg>';}
@@ -115,7 +129,7 @@ let settings=loadSettings();
 
 /* ============================ state ============================ */
 let store=load();
-let view={projectId:null,tags:[],search:'',composerIcon:'sine',expanded:{},drawer:false,searchOpen:false,tagsOpen:false,editorTagsOpen:{},titleEdit:null,deskNav:true,section:'tasks'};
+let view={projectId:null,tags:[],search:'',composerIcon:'sine',expanded:{},drawer:false,searchOpen:false,tagsOpen:false,editorTagsOpen:{},titleEdit:null,deskNav:true,section:'tasks',lkExpanded:{},lkFilter:'ALL',lkSort:'recent',lkFilterOpen:false,lkSearch:'',lkAttachOpen:null,lkLightbox:null};
 let subDraft={};
 let picker={open:false,target:null};
 let promptS={open:false,kind:'project',value:''};
@@ -202,7 +216,9 @@ const LK_URL="locker.url", LK_TOKEN="locker.token", LK_CHUNK=4*1024*1024;
 const locker={url:localStorage.getItem(LK_URL)||"", token:localStorage.getItem(LK_TOKEN)||""};
 const lockerOn=()=>!!(locker.url&&locker.token);
 const lockerReady=()=>lockerOn()&&cloudOn()&&encOn();
-let lockerIndex=[], lockerLoaded=false, lkUploads={}, lkOpen=null, lkBlobUrl=null, lkText="", lkErr="";
+let lockerIndex=[], lockerLoaded=false, lkUploads={}, lkErr="";
+const KINDMETA={audio:{icon:'wave',label:'Audio'},image:{icon:'image',label:'Image'},video:{icon:'video',label:'Video'},pdf:{icon:'doc',label:'PDF'},text:{icon:'text',label:'Text'},file:{icon:'archive',label:'File'}};
+let lkMedia={}, lkAudioCtx=null, _lkPushT=null;
 async function encJSON(obj){const key=await getKey();const iv=crypto.getRandomValues(new Uint8Array(12));const ct=await crypto.subtle.encrypt({name:"AES-GCM",iv},key,new TextEncoder().encode(JSON.stringify(obj)));return JSON.stringify({enc:"v1",salt:encSalt,iv:b64e(iv),ct:b64e(ct)});}
 async function decJSON(env){const key=await getKey(env.salt);const pt=await crypto.subtle.decrypt({name:"AES-GCM",iv:b64d(env.iv)},key,b64d(env.ct));return JSON.parse(new TextDecoder().decode(pt));}
 async function encBytes(buf){const key=await getKey();const iv=crypto.getRandomValues(new Uint8Array(12));const ct=new Uint8Array(await crypto.subtle.encrypt({name:"AES-GCM",iv},key,buf));const out=new Uint8Array(12+ct.length);out.set(iv,0);out.set(ct,12);return out;}
@@ -224,7 +240,7 @@ async function lockerPull(){
 }
 async function lockerPush(){if(!cloudOn()||!encOn())return;const content=await encJSON({items:lockerIndex});const body={files:{}};body.files["locker.json"]={content};const r=await fetch("https://api.github.com/gists/"+cloud.id,{method:"PATCH",headers:ghHeaders(true),body:JSON.stringify(body)});if(!r.ok)throw new Error("index push "+r.status);}
 function guessType(name){const e=(name.split(".").pop()||"").toLowerCase();const m={jpg:"image/jpeg",jpeg:"image/jpeg",png:"image/png",gif:"image/gif",webp:"image/webp",svg:"image/svg+xml",avif:"image/avif",bmp:"image/bmp",mp3:"audio/mpeg",wav:"audio/wav",ogg:"audio/ogg",oga:"audio/ogg",m4a:"audio/mp4",aac:"audio/aac",flac:"audio/flac",mp4:"video/mp4",webm:"video/webm",mov:"video/quicktime",mkv:"video/x-matroska",pdf:"application/pdf",txt:"text/plain",md:"text/markdown",csv:"text/csv",log:"text/plain",json:"application/json"};return m[e]||"";}
-function mediaKind(t,name){t=t||guessType(name);if(t.startsWith("image/"))return "image";if(t.startsWith("audio/"))return "audio";if(t.startsWith("video/"))return "video";if(t==="application/pdf")return "pdf";if(t.startsWith("text/")||t==="application/json")return "text";return "file";}
+function mediaKind(t,name){t=t||guessType(name);const e=((name||'').split('.').pop()||'').toLowerCase();if(t.startsWith("image/"))return "image";if(t.startsWith("audio/"))return "audio";if(t.startsWith("video/"))return "video";if(t==="application/pdf"||e==="pdf")return "pdf";if(t.startsWith("text/")||t==="application/json"||["txt","md","markdown","csv","log","json","js","ts","tsx","jsx","cpp","h","hpp","cc","c","rs","py","go","css","html","xml","yaml","yml","java","gen","genexpr","maxpat"].includes(e))return "text";return "file";}
 function kindIcon(k){return {image:"scope",audio:"sine",video:"triangle",pdf:"square",text:"clock",file:"patch"}[k]||"patch";}
 function fmtSize(b){if(b<1024)return b+" B";if(b<1048576)return (b/1024).toFixed(0)+" KB";if(b<1073741824)return (b/1048576).toFixed(1)+" MB";return (b/1073741824).toFixed(2)+" GB";}
 async function lockerUpload(fileList){
@@ -242,45 +258,152 @@ async function lockerUpload(fileList){
 }
 function lkProg(){document.querySelectorAll(".otk-lkprog").forEach(el=>{const u=lkUploads[el.dataset.id];if(u)el.style.width=Math.round(u.done/u.total*100)+"%";});}
 async function lockerBlob(item){const parts=[];for(let i=0;i<item.chunks;i++)parts.push(await decBytes(await lkGet(item.id+"/"+i)));return new Blob(parts,{type:item.type||"application/octet-stream"});}
-async function lockerOpen(id){const item=lockerIndex.find(x=>x.id===id);if(!item)return;lkOpen=id;lkBlobUrl=null;lkText="";lkErr="";render();
-  try{const blob=await lockerBlob(item);if(mediaKind(item.type,item.name)==="text")lkText=await blob.text();if(lkBlobUrl)URL.revokeObjectURL(lkBlobUrl);lkBlobUrl=URL.createObjectURL(blob);render();}
-  catch(e){lkErr="Decrypt failed: "+(e.message||e);render();}}
-function lockerCloseViewer(){if(lkBlobUrl)URL.revokeObjectURL(lkBlobUrl);lkBlobUrl=null;lkOpen=null;lkText="";render();}
+function lkAC(){if(!lkAudioCtx){const AC=window.AudioContext||window.webkitAudioContext;lkAudioCtx=new AC();}if(lkAudioCtx.state==='suspended')lkAudioCtx.resume();return lkAudioCtx;}
+function lkPeaks(samples,buckets){const n=samples.length,step=n/buckets,out=new Float32Array(buckets);let mx=0;for(let i=0;i<buckets;i++){let m=0;const s=i*step|0,e=Math.min(n,(i+1)*step|0);for(let j=s;j<e;j++){const a=Math.abs(samples[j]);if(a>m)m=a;}out[i]=m;if(m>mx)mx=m;}if(mx>0)for(let i=0;i<buckets;i++)out[i]/=mx;return out;}
+function fmtDur(s){s=Math.max(0,Math.round(s||0));const m=(s/60)|0;return m+':'+String(s%60).padStart(2,'0');}
+function lkCurTime(id){const a=document.getElementById('otk-audio-'+id);return a?a.currentTime:0;}
+function lkDrawWave(canvas,id){const m=lkMedia[id];if(!canvas||!m||!m.peaks)return;const dpr=Math.min(2,window.devicePixelRatio||1);const cssW=canvas.clientWidth||(canvas.parentNode&&canvas.parentNode.clientWidth)||280,H=54;if(canvas.width!==Math.round(cssW*dpr)||canvas.height!==Math.round(H*dpr)){canvas.width=Math.round(cssW*dpr);canvas.height=Math.round(H*dpr);}const ctx=canvas.getContext('2d');ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,cssW,H);const pk=m.peaks,n=pk.length,dur=m.duration||0,cur=lkCurTime(id),prog=dur?Math.max(0,Math.min(1,cur/dur)):0;const cs=getComputedStyle(document.documentElement),acc=(cs.getPropertyValue('--accent')||'#ececec').trim(),future=(cs.getPropertyValue('--dim2')||'#7b7b7b').trim();const mid=H/2,stepw=2.6,bw=1.7,cols=Math.max(1,Math.floor(cssW/stepw));for(let i=0;i<cols;i++){const p=pk[Math.floor(i/cols*n)]||0,bh=Math.max(1.5,p*(H-10)),x=i*stepw,past=(i/cols)<=prog;ctx.fillStyle=past?acc:future;ctx.globalAlpha=past?1:.5;ctx.fillRect(x,mid-bh/2,bw,bh);}ctx.globalAlpha=1;const phx=Math.max(0,Math.min(cssW,prog*cssW));ctx.fillStyle=acc;ctx.fillRect(phx-1,3,2,H-6);}
+async function lockerEnsureMedia(id){
+  if(lkMedia[id]&&(lkMedia[id].ready||lkMedia[id].loading))return;
+  const item=lockerIndex.find(x=>x.id===id);if(!item)return;
+  lkMedia[id]={loading:true};
+  try{
+    const blob=await lockerBlob(item);const kind=mediaKind(item.type,item.name);const url=URL.createObjectURL(blob);const m={ready:true,kind,url};
+    if(kind==='text'){try{m.text=await blob.text();}catch(e){m.text='';}}
+    else if(kind==='image'){await new Promise(res=>{const im=new Image();im.onload=()=>{m.w=im.naturalWidth;m.h=im.naturalHeight;res();};im.onerror=res;im.src=url;});}
+    else if(kind==='audio'){try{const ab=await blob.arrayBuffer();const buf=await lkAC().decodeAudioData(ab.slice(0));m.duration=buf.duration;m.peaks=lkPeaks(buf.getChannelData(0),900);}catch(e){}}
+    else if(kind==='video'){await new Promise(res=>{const vd=document.createElement('video');vd.preload='metadata';vd.muted=true;vd.src=url;vd.onloadeddata=()=>{try{vd.currentTime=Math.min(0.1,vd.duration||0.1);}catch(e){res();}};vd.onseeked=()=>{try{const c=document.createElement('canvas');c.width=vd.videoWidth||480;c.height=vd.videoHeight||270;c.getContext('2d').drawImage(vd,0,0,c.width,c.height);m.poster=c.toDataURL('image/png');m.w=vd.videoWidth;m.h=vd.videoHeight;m.duration=vd.duration;}catch(e){}res();};vd.onerror=res;setTimeout(res,4000);});}
+    lkMedia[id]=m;
+  }catch(e){lkMedia[id]={ready:true,err:'Decrypt failed: '+(e.message||e)};}
+  if(view.section==='locker'&&(view.lkExpanded[id]||view.lkLightbox===id))render();
+}
+function lockerRevokeMedia(){Object.keys(lkMedia).forEach(k=>{const m=lkMedia[k];try{if(m&&m.url)URL.revokeObjectURL(m.url);}catch(e){}});lkMedia={};}
+function lkInline(s){s=esc(s);s=s.replace(/\*\*([^*]+)\*\*/g,'<strong style="color:var(--text);font-weight:700;">$1</strong>');return s.replace(/`([^`]+)`/g,'<code style="color:var(--text);background:var(--bg);padding:1px 4px;border-radius:3px;font-size:11px;">$1</code>');}
+function lkMd(txt){const lines=(txt||'').split('\n');let h='<div style="padding:14px 16px;">';for(const ln of lines){if(/^##\s/.test(ln))h+='<div style="font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--text);margin:10px 0 4px;">'+esc(ln.slice(3))+'</div>';else if(/^#\s/.test(ln))h+='<div style="font-size:15px;font-weight:700;color:var(--text);margin:0 0 6px;">'+esc(ln.slice(2))+'</div>';else if(/^-\s/.test(ln))h+='<div style="display:flex;gap:7px;color:var(--text2);font-size:12px;line-height:1.6;"><span style="color:var(--dim);">·</span><span>'+lkInline(ln.slice(2))+'</span></div>';else if(!ln.trim())h+='<div style="height:6px;"></div>';else h+='<div style="color:var(--text2);font-size:12px;line-height:1.65;">'+lkInline(ln)+'</div>';}return h+'</div>';}
+function lockerToggleTag(id,tid){const it=lockerIndex.find(x=>x.id===id);if(!it)return;it.tags=it.tags||[];const i=it.tags.indexOf(tid);if(i>=0)it.tags.splice(i,1);else it.tags.push(tid);render();lockerPushDebounced();}
+function lockerAttach(id,tid){const it=lockerIndex.find(x=>x.id===id);if(!it)return;it.task=tid;view.lkAttachOpen=null;render();lockerPushDebounced();}
+function lockerUnlink(id){const it=lockerIndex.find(x=>x.id===id);if(!it)return;it.task=null;render();lockerPushDebounced();}
+function lockerPushDebounced(){clearTimeout(_lkPushT);_lkPushT=setTimeout(()=>{lockerPush().catch(()=>{});},900);}
 async function lockerDownload(id){const item=lockerIndex.find(x=>x.id===id);if(!item)return;try{const blob=await lockerBlob(item);const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=item.name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),15000);}catch(e){alert("Download failed: "+(e.message||e));}}
-async function lockerDelete(id){const item=lockerIndex.find(x=>x.id===id);if(!item)return;if(!confirm('Delete "'+item.name+'" from the locker?'))return;for(let i=0;i<item.chunks;i++)lkDelObj(item.id+"/"+i);lockerIndex=lockerIndex.filter(x=>x.id!==id);try{await lockerPush();}catch(e){}render();}
-function setSection(s){view.section=s;view.drawer=false;render();if(s==='locker'&&!lockerLoaded&&cloudOn()&&encOn())lockerPull().then(render);}
+async function lockerDelete(id){const item=lockerIndex.find(x=>x.id===id);if(!item)return;if(!confirm('Delete "'+item.name+'" from the locker?'))return;for(let i=0;i<item.chunks;i++)lkDelObj(item.id+"/"+i);lockerIndex=lockerIndex.filter(x=>x.id!==id);try{const m=lkMedia[id];if(m&&m.url)URL.revokeObjectURL(m.url);}catch(e){}delete lkMedia[id];delete view.lkExpanded[id];if(view.lkLightbox===id)view.lkLightbox=null;try{await lockerPush();}catch(e){}render();}
+function setSection(s){if(s!=='locker'){lockerRevokeMedia();view.lkExpanded={};}view.section=s;view.drawer=false;view.lkLightbox=null;view.lkFilterOpen=false;view.lkAttachOpen=null;render();if(s==='locker'&&!lockerLoaded&&cloudOn()&&encOn())lockerPull().then(render);}
 function sectionToggleHTML(){const t=(s,l)=>'<button data-act="setSection" data-s="'+s+'" style="padding:5px 11px;border:none;border-radius:var(--r3);cursor:pointer;font-family:inherit;font-size:10px;letter-spacing:.1em;text-transform:uppercase;background:'+(view.section===s?'var(--accent-soft)':'transparent')+';color:'+(view.section===s?'var(--accent)':'var(--dim2)')+';">'+l+'</button>';return '<div style="display:flex;gap:2px;flex:none;border:1px solid var(--line);border-radius:var(--r3);padding:2px;">'+t('tasks','Tasks')+t('locker','Locker')+'</div>';}
 function lkNotice(title,body){return '<main style="flex:1;display:flex;align-items:center;justify-content:center;text-align:center;padding:40px;"><div style="max-width:320px;color:var(--faint);font-size:12.5px;line-height:1.8;"><div style="color:var(--dim);text-transform:uppercase;letter-spacing:2px;font-size:11px;margin-bottom:10px;">'+title+'</div>'+body+'</div></main>';}
 function lockerMainHTML(mobile){
-  const pad=mobile?'12px':'18px';
+  const pad=mobile?'14px':'22px',g=G();
   if(!lockerOn())return lkNotice("Locker not set up","Open <b style=\"color:var(--accent)\">Sync</b> and add your Worker URL + Locker token at the bottom.");
   if(!cloudOn()||!encOn())return lkNotice("Vault required","The locker reuses your gist + passphrase. Connect <b style=\"color:var(--accent)\">Sync</b> and set a passphrase first.");
-  const up=Object.keys(lkUploads).map(id=>{const u=lkUploads[id];return '<div style="display:flex;align-items:center;gap:9px;padding:8px 11px;border:1px solid var(--line);border-radius:var(--r2);background:var(--surface2);margin-bottom:6px;"><span style="flex:1;min-width:0;font-size:12px;color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">↑ '+esc(u.name)+'</span>'+(u.err?'<span style="font-size:10px;color:#e0705a;">'+esc(u.err)+'</span>':'<div style="width:90px;height:4px;border-radius:2px;background:var(--line);overflow:hidden;flex:none;"><div class="otk-lkprog" data-id="'+id+'" style="height:100%;width:'+Math.round(u.done/u.total*100)+'%;background:var(--accent);transition:width .2s;"></div></div>')+'</div>';}).join('');
-  const items=lockerIndex.map(it=>{const k=mediaKind(it.type,it.name);return '<div style="display:flex;align-items:center;gap:11px;padding:10px 12px;border:1px solid var(--line-soft);border-radius:var(--r2);background:var(--surface2);margin-bottom:7px;">'
-    +'<span data-act="lkOpen" data-id="'+it.id+'" style="display:flex;flex:none;color:var(--accent);cursor:pointer;">'+icon(kindIcon(k),Math.round(20*Math.min(G(),1.3)))+'</span>'
-    +'<div data-act="lkOpen" data-id="'+it.id+'" style="flex:1;min-width:0;cursor:pointer;"><div style="font-size:13px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(it.name)+'</div><div style="font-size:10px;letter-spacing:.05em;text-transform:uppercase;color:var(--faint);margin-top:2px;">'+fmtSize(it.size)+' · '+esc(fmtDate(it.ts))+'</div></div>'
-    +'<button data-act="lkDownload" data-id="'+it.id+'" title="Download" style="display:flex;flex:none;padding:6px;border:none;background:transparent;color:var(--dim2);cursor:pointer;border-radius:var(--r3);">'+icon('gain',15)+'</button>'
-    +'<button data-act="lkDelete" data-id="'+it.id+'" title="Delete" style="display:flex;flex:none;padding:6px;border:none;background:transparent;color:var(--dim2);cursor:pointer;border-radius:var(--r3);">'+icon('trash',15)+'</button></div>';}).join('');
-  const dz='<div id="otk-dz" data-act="lkPick" style="display:flex;align-items:center;justify-content:center;gap:10px;padding:16px;border:1px dashed var(--line-strong);border-radius:var(--r1);background:var(--surface);cursor:pointer;margin-bottom:12px;color:var(--dim);"><span style="display:flex;color:var(--accent);">'+icon('plus',18)+'</span><span style="font-size:12px;">'+(mobile?'Add files':'Drop files here, or click to add')+'</span></div><input id="otk-file" type="file" multiple style="display:none;" />';
-  const empty=(lockerIndex.length||Object.keys(lkUploads).length||lkErr)?'':'<div style="padding:30px 10px;text-align:center;color:var(--faint);font-size:12px;line-height:1.7;">Locker is empty.<br/>Add a file — it uploads encrypted and appears on your other devices.</div>';
+  const tById=tagMap();const f=view.lkFilter||'ALL';
+  const activeLabel=f==='ALL'?'All':(f.indexOf('type:')===0?(KINDMETA[f.slice(5)]||{label:f.slice(5)}).label:(tById[f.slice(4)]||{label:'Tag'}).label);
+  const totalBytes=lockerIndex.reduce((s,it)=>s+(it.size||0),0);
+  const up=Object.keys(lkUploads).map(id=>{const u=lkUploads[id];return '<div style="display:flex;align-items:center;gap:9px;padding:8px 11px;border:1px solid var(--line);border-radius:var(--r2);background:var(--surface2);margin-bottom:6px;"><span style="display:flex;flex:none;color:var(--accent);">'+icon('upload',14)+'</span><span style="flex:1;min-width:0;font-size:12px;color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(u.name)+'</span>'+(u.err?'<span style="font-size:10px;color:#e0705a;">'+esc(u.err)+'</span>':'<div style="width:90px;height:4px;border-radius:2px;background:var(--line);overflow:hidden;flex:none;"><div class="otk-lkprog" data-id="'+id+'" style="height:100%;width:'+Math.round(u.done/u.total*100)+'%;background:var(--accent);transition:width .2s;"></div></div>')+'</div>';}).join('');
   const errHtml=lkErr?'<div style="padding:9px 11px;border:1px solid #5a3230;border-radius:var(--r2);background:rgba(224,90,70,.1);color:#e0705a;font-size:11px;margin-bottom:10px;">'+esc(lkErr)+'</div>':'';
-  return '<main style="flex:1;min-width:0;display:flex;flex-direction:column;overflow:hidden;">'
-    +'<div style="display:flex;align-items:center;gap:10px;padding:13px '+pad+' 10px;flex:none;"><span style="color:var(--accent);display:flex;">'+icon('patch',Math.round(18*Math.min(G(),1.3)))+'</span><h1 style="margin:0;font-size:16px;font-weight:700;letter-spacing:.01em;color:var(--text);flex:1;text-transform:var(--tt);">Locker</h1><span style="font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--faint);">'+lockerIndex.length+' file'+(lockerIndex.length===1?'':'s')+'</span></div>'
-    +'<div style="flex:1;overflow-y:auto;padding:0 '+pad+' 20px;">'+errHtml+dz+up+items+empty+'</div></main>';
+  const pill='display:flex;align-items:center;gap:7px;padding:7px 11px;border:1px solid var(--line);border-radius:var(--r2);background:var(--bg2);color:var(--text2);font-family:inherit;font-size:10.5px;letter-spacing:.04em;text-transform:uppercase;cursor:pointer;';
+  const titleBar='<div style="display:flex;align-items:center;gap:11px;padding:16px '+pad+' 10px;flex:none;flex-wrap:wrap;">'
+    +'<span style="display:flex;color:var(--text2);flex:none;">'+icon('archive',Math.round(18*Math.min(g,1.3)))+'</span>'
+    +'<h1 style="margin:0;font-size:15px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--text);flex:none;">Locker</h1>'
+    +'<span style="font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--faint);flex:none;white-space:nowrap;">· '+lockerIndex.length+' file'+(lockerIndex.length===1?'':'s')+' · '+fmtSize(totalBytes)+'</span>'
+    +'<span style="flex:1;min-width:12px;"></span>'
+    +'<div style="display:flex;align-items:center;gap:8px;flex:none;padding:7px 11px;border:1px solid var(--line);border-radius:var(--r2);background:var(--bg2);width:200px;max-width:44vw;"><span style="display:flex;color:var(--faint);flex:none;">'+icon('search',14)+'</span><input id="otk-lksearch" value="'+esc(view.lkSearch)+'" placeholder="Search…" style="flex:1;min-width:0;background:transparent;border:none;outline:none;font-family:inherit;font-size:12px;color:var(--text2);" /></div>'
+    +'<div style="position:relative;flex:none;"><button data-act="lkFilterToggle" style="'+pill+'"><span style="display:flex;">'+icon('sliders',14)+'</span><span style="letter-spacing:.08em;">'+esc(activeLabel)+'</span><span style="display:flex;">'+icon('chevron',13)+'</span></button>'+(view.lkFilterOpen?('<div data-act="lkFilterClose" style="position:fixed;inset:0;z-index:40;"></div>'+lockerFilterMenuHTML()):'')+'</div>'
+    +'</div>';
+  const importRow='<div style="padding:0 '+pad+';flex:none;"><div id="otk-dz" data-act="lkPick" style="display:flex;align-items:center;gap:12px;margin-bottom:14px;padding:11px 12px;border:1px solid var(--line);border-radius:var(--r1);background:var(--bg2);cursor:pointer;"><span style="display:flex;align-items:center;justify-content:center;width:36px;height:36px;flex:none;border:1px solid var(--line-strong);border-radius:var(--r2);background:var(--bg);color:var(--text2);">'+icon('upload',15)+'</span><span style="flex:1;min-width:0;font-size:13px;color:var(--dim2);">'+(mobile?'Tap to import files…':'Drop files here, or click to import…')+'</span><span style="align-self:stretch;flex:none;display:flex;align-items:center;padding:0 16px;border-radius:var(--r2);background:var(--accent);color:var(--bg);font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;">Import</span></div><input id="otk-file" type="file" multiple style="display:none;" /></div>';
+  return '<main style="flex:1;min-width:0;display:flex;flex-direction:column;overflow:hidden;">'+titleBar+importRow
+    +'<div style="flex:1;overflow-y:auto;padding:0 '+pad+' 24px;">'+errHtml+up+'<div id="otk-lklist">'+lockerListHTML()+'</div></div></main>';
 }
+function lockerFilterMenuHTML(){
+  const tById=tagMap();const present={};lockerIndex.forEach(it=>{const k=mediaKind(it.type,it.name);present[k]=(present[k]||0)+1;});
+  const usedTags={};lockerIndex.forEach(it=>(it.tags||[]).forEach(tg=>usedTags[tg]=(usedTags[tg]||0)+1));
+  const mib='display:flex;align-items:center;gap:9px;width:100%;padding:7px 9px;border:none;border-radius:var(--r3);font-family:inherit;font-size:11px;letter-spacing:.02em;cursor:pointer;text-align:left;';
+  const fItem=(fv,label,iconKey,count)=>{const on=view.lkFilter===fv;return '<button data-act="lkSetFilter" data-f="'+fv+'" style="'+mib+'background:'+(on?'var(--accent-soft)':'transparent')+';color:'+(on?'var(--text)':'var(--dim)')+';"><span style="display:flex;flex:none;color:'+(on?'var(--accent)':'var(--dim2)')+';">'+icon(iconKey,13)+'</span><span style="flex:1;">'+esc(label)+'</span>'+(count!=null?'<span style="color:var(--faint);font-size:9.5px;">'+count+'</span>':'')+'</button>';};
+  let h='<div data-act="stop" style="position:absolute;right:0;top:calc(100% + 7px);z-index:41;width:214px;padding:8px;border:1px solid var(--line-strong);border-radius:var(--r1);background:var(--surface2);box-shadow:0 20px 50px rgba(0,0,0,.55);">';
+  h+='<div style="font-size:8.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--faint);padding:4px 8px 6px;">Filter</div>'+fItem('ALL','All','grid',lockerIndex.length);
+  Object.keys(present).forEach(k=>{h+=fItem('type:'+k,(KINDMETA[k]||{label:k}).label,(KINDMETA[k]||{icon:'archive'}).icon,present[k]);});
+  const utk=Object.keys(usedTags);if(utk.length){h+='<div style="height:1px;background:var(--line);margin:7px 4px;"></div>';utk.forEach(tg=>{const t=tById[tg];if(t)h+=fItem('tag:'+tg,t.label,t.icon,usedTags[tg]);});}
+  h+='<div style="height:1px;background:var(--line);margin:7px 4px;"></div><div style="font-size:8.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--faint);padding:4px 8px 6px;">Sort</div>';
+  [['recent','Recent'],['name','Name'],['size','Size'],['type','Type']].forEach(kv=>{const on=view.lkSort===kv[0];h+='<button data-act="lkSetSort" data-s="'+kv[0]+'" style="'+mib+'background:'+(on?'var(--accent-soft)':'transparent')+';color:'+(on?'var(--text)':'var(--dim)')+';"><span style="flex:1;">'+kv[1]+'</span></button>';});
+  return h+'</div>';
+}
+function lockerListHTML(){
+  const tById=tagMap();let list=lockerIndex.slice();const f=view.lkFilter||'ALL';
+  if(f.indexOf('type:')===0){const tk=f.slice(5);list=list.filter(it=>mediaKind(it.type,it.name)===tk);}
+  else if(f.indexOf('tag:')===0){const tg=f.slice(4);list=list.filter(it=>(it.tags||[]).includes(tg));}
+  const q=(view.lkSearch||'').trim().toLowerCase();
+  if(q)list=list.filter(it=>(it.name+' '+(it.tags||[]).map(t=>(tById[t]||{}).label||'').join(' ')).toLowerCase().includes(q));
+  const sort=view.lkSort||'recent';
+  if(sort==='name')list.sort((a,b)=>a.name.localeCompare(b.name));
+  else if(sort==='size')list.sort((a,b)=>(b.size||0)-(a.size||0));
+  else if(sort==='type')list.sort((a,b)=>mediaKind(a.type,a.name).localeCompare(mediaKind(b.type,b.name))||a.name.localeCompare(b.name));
+  else list.sort((a,b)=>(b.ts||0)-(a.ts||0));
+  if(!list.length)return '<div style="padding:52px 20px;text-align:center;color:var(--faint);font-size:12px;line-height:1.7;border:1px solid var(--line);border-radius:var(--r1);background:var(--bg2);">'+(lockerIndex.length?'No files match.<br/>Try a different filter or search.':'Locker is empty.<br/>Import a file — it uploads encrypted and appears on your other devices.')+'</div>';
+  return '<div style="border:1px solid var(--line);border-radius:var(--r1);overflow:hidden;background:var(--bg2);">'+list.map((it,i)=>lockerItemHTML(it,i,list.length)).join('')+'</div>';
+}
+function lockerItemHTML(it,idx,total){
+  const g=G(),k=mediaKind(it.type,it.name),meta=KINDMETA[k]||KINDMETA.file,exp=!!view.lkExpanded[it.id],m=lkMedia[it.id],tById=tagMap();
+  const miniTags=(it.tags||[]).map(tid=>tById[tid]).filter(Boolean).slice(0,3).map(tg=>'<span style="display:flex;color:var(--dim2);">'+icon(tg.icon,13)+'</span>').join('');
+  const dur=(m&&m.duration)||it.dur,dim=(m&&m.w&&m.h)?(m.w+'×'+m.h):'';
+  let mr=[];if(k==='audio'){if(dur)mr.push(fmtDur(dur));mr.push(fmtSize(it.size));}else if(k==='video'){if(dur)mr.push(fmtDur(dur));mr.push(dim||fmtSize(it.size));}else if(k==='image'){if(dim)mr.push(dim);mr.push(fmtSize(it.size));}else mr.push(fmtSize(it.size));
+  const row='<div data-act="lkExpand" data-id="'+it.id+'" style="display:flex;align-items:center;gap:12px;padding:12px 15px;cursor:pointer;">'
+    +'<span style="display:flex;flex:none;color:var(--text2);">'+icon(meta.icon,Math.round(19*Math.min(g,1.3)))+'</span>'
+    +'<span style="flex:1;min-width:0;font-size:13px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(it.name)+'</span>'
+    +(miniTags?'<span style="display:flex;gap:6px;flex:none;">'+miniTags+'</span>':'')
+    +'<span style="font-size:10px;letter-spacing:.05em;color:var(--faint);flex:none;white-space:nowrap;">'+esc(mr.join(' · '))+'</span>'
+    +'<span style="display:flex;flex:none;color:var(--faint);transition:transform .18s;transform:rotate('+(exp?'180deg':'0deg')+');">'+icon('chevron',14)+'</span></div>';
+  const bottom=idx===total-1?'transparent':'var(--line-soft)';
+  return '<div style="border-bottom:1px solid '+bottom+';'+(exp?'background:var(--surface);':'')+'">'+row+(exp?lockerExpandHTML(it,k,m):'')+'</div>';
+}
+function lockerExpandHTML(it,k,m){
+  let preview='';
+  if(!m||m.loading)preview='<div style="padding:24px;text-align:center;color:var(--dim);font-size:11.5px;">Decrypting…</div>';
+  else if(m.err)preview='<div style="padding:18px;color:#e0705a;font-size:11.5px;">'+esc(m.err)+'</div>';
+  else if(k==='audio')preview='<div style="display:flex;align-items:center;gap:12px;background:var(--bg);border:1px solid var(--line);border-radius:var(--r2);padding:11px 13px;">'
+    +'<button id="otk-play-'+it.id+'" data-act="lkPlay" data-id="'+it.id+'" title="Play / Pause" style="display:flex;align-items:center;justify-content:center;width:38px;height:38px;flex:none;border:none;border-radius:50%;background:var(--accent);color:var(--bg);cursor:pointer;">'+icon('play',15)+'</button>'
+    +'<canvas id="otk-wave-'+it.id+'" data-act="lkSeek" data-id="'+it.id+'" style="display:block;flex:1;min-width:0;width:100%;height:54px;cursor:pointer;"></canvas>'
+    +'<span id="otk-time-'+it.id+'" style="font-size:10.5px;color:var(--dim);flex:none;min-width:74px;text-align:right;font-variant-numeric:tabular-nums;">0:00 / '+fmtDur(m.duration||0)+'</span>'
+    +'<audio id="otk-audio-'+it.id+'" data-lk="'+it.id+'" src="'+m.url+'" preload="metadata" style="display:none;"></audio></div>'+(m.peaks?'':'<div style="font-size:10px;color:var(--faint);margin-top:6px;">Waveform unavailable — playback still works.</div>');
+  else if(k==='image')preview='<div data-act="lkEnlarge" data-id="'+it.id+'" style="position:relative;border:1px solid var(--line);border-radius:var(--r2);overflow:hidden;background:var(--bg);cursor:zoom-in;"><img src="'+m.url+'" style="display:block;width:100%;height:auto;max-height:340px;object-fit:cover;" /><span style="position:absolute;right:8px;bottom:8px;display:flex;width:28px;height:28px;align-items:center;justify-content:center;border-radius:var(--r3);background:rgba(0,0,0,.6);color:#fff;">'+icon('expand',15)+'</span></div>';
+  else if(k==='video')preview='<div data-act="lkEnlarge" data-id="'+it.id+'" style="position:relative;border:1px solid var(--line);border-radius:var(--r2);overflow:hidden;background:#000;cursor:pointer;">'+(m.poster?'<img src="'+m.poster+'" style="display:block;width:100%;height:auto;max-height:340px;object-fit:contain;" />':'<div style="height:190px;"></div>')+'<span style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;"><span style="display:flex;width:52px;height:52px;align-items:center;justify-content:center;border-radius:50%;background:rgba(0,0,0,.5);border:2px solid rgba(255,255,255,.85);color:#fff;">'+icon('play',20)+'</span></span></div>';
+  else if(k==='pdf')preview='<div data-act="lkEnlarge" data-id="'+it.id+'" style="display:flex;align-items:center;gap:12px;border:1px solid var(--line);border-radius:var(--r2);padding:16px;background:var(--bg);cursor:pointer;"><span style="display:flex;color:var(--text2);">'+icon('doc',30)+'</span><div style="flex:1;min-width:0;"><div style="font-size:12px;color:var(--text);">Open PDF</div><div style="font-size:10px;color:var(--faint);margin-top:2px;">Click to view full screen</div></div><span style="display:flex;color:var(--dim2);">'+icon('expand',16)+'</span></div>';
+  else if(k==='text'){const isMd=/\.(md|markdown)$/i.test(it.name);const body=isMd?lkMd(m.text||''):('<pre style="margin:0;padding:13px 15px;max-height:360px;overflow:auto;white-space:pre-wrap;word-break:break-word;font-family:inherit;font-size:11.5px;line-height:1.6;color:var(--text2);">'+esc(m.text||'(empty)')+'</pre>');preview='<div style="border:1px solid var(--line);border-radius:var(--r2);overflow:hidden;background:var(--bg);">'+body+'</div>';}
+  else preview='<div style="display:flex;align-items:center;gap:12px;border:1px solid var(--line);border-radius:var(--r2);padding:16px;background:var(--bg);"><span style="display:flex;color:var(--text2);">'+icon('archive',26)+'</span><div style="font-size:12px;color:var(--dim);">No inline preview — use Download.</div></div>';
+  const wide=(k==='image'||k==='video');
+  const prevCol='<div style="'+(wide?'flex:1 1 320px;min-width:240px;max-width:480px;':'flex:1 1 100%;width:100%;')+'">'+preview+'</div>';
+  const mp=[['Size',fmtSize(it.size)],['Type',(m&&m.kind?KINDMETA[m.kind].label:KINDMETA[k].label)+(it.type?' · '+esc(it.type):'')],['Added',esc(fmtDate(it.ts))]];
+  if(m&&m.w&&m.h)mp.push(['Dimensions',m.w+'×'+m.h]);if(m&&m.duration)mp.push(['Duration',fmtDur(m.duration)]);
+  const metaGrid='<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:10px;">'+mp.map(p=>'<div style="display:flex;flex-direction:column;gap:2px;"><span style="font-size:8.5px;letter-spacing:.13em;text-transform:uppercase;color:var(--faint);">'+p[0]+'</span><span style="font-size:11.5px;color:var(--text2);word-break:break-word;">'+p[1]+'</span></div>').join('')+'</div>';
+  const task=it.task?store.tasks.find(t=>t.id===it.task):null;let taskRow;
+  if(task){const proj=store.projects.find(p=>p.id===task.projectId);taskRow='<span style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text);border:1px solid var(--line-strong);background:var(--bg);border-radius:var(--r2);padding:5px 9px;max-width:100%;"><span style="display:flex;color:var(--accent);flex:none;">'+icon('link',12)+'</span><span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(titleOf(task.title))+'</span>'+(proj?'<span style="color:var(--faint);flex:none;">· '+esc(proj.name)+'</span>':'')+'</span><button data-act="lkUnlink" data-id="'+it.id+'" title="Detach" style="display:flex;flex:none;width:26px;height:26px;align-items:center;justify-content:center;border:1px solid var(--line-strong);border-radius:var(--r3);background:transparent;color:var(--dim2);cursor:pointer;">'+icon('x',12)+'</button>';}
+  else{taskRow='<button data-act="lkAttachOpen" data-id="'+it.id+'" style="display:flex;align-items:center;gap:6px;padding:5px 10px;border:1px dashed var(--line-strong);border-radius:var(--r2);background:transparent;color:var(--dim);font-size:10.5px;letter-spacing:.03em;text-transform:uppercase;cursor:pointer;"><span style="display:flex;">'+icon('link',12)+'</span> Attach</button>';
+    if(view.lkAttachOpen===it.id){const opts=store.tasks.filter(t=>!t.done).slice(0,20).map(t=>{return '<button data-act="lkAttach" data-id="'+it.id+'" data-tid="'+t.id+'" style="display:flex;align-items:center;gap:5px;max-width:100%;padding:5px 9px;border:1px solid var(--line);border-radius:var(--r3);background:var(--bg2);color:var(--dim);font-size:10.5px;cursor:pointer;"><span style="display:flex;flex:none;color:var(--dim2);">'+icon(t.icon||'sine',12)+'</span><span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:170px;">'+esc(titleOf(t.title))+'</span></button>';}).join('');
+      taskRow+='<div style="display:flex;flex-wrap:wrap;gap:5px;width:100%;margin-top:2px;">'+(opts||'<span style="font-size:10.5px;color:var(--faint);">No open tasks to attach.</span>')+'</div>';}}
+  const taskBlock='<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;"><span style="font-size:8.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--faint);flex:none;">Task</span>'+taskRow+'</div>';
+  const chips=store.tags.map(tg=>{const active=(it.tags||[]).includes(tg.id);return '<button data-act="lkToggleTag" data-id="'+it.id+'" data-tid="'+tg.id+'" style="display:flex;align-items:center;gap:5px;padding:4px 8px;border-radius:var(--r3);font-family:inherit;font-size:10px;letter-spacing:.04em;text-transform:uppercase;cursor:pointer;'+(active?'background:var(--accent-soft);border:1px solid var(--accent-line);color:var(--text);':'background:var(--bg2);border:1px solid var(--line);color:var(--dim2);')+'"><span style="display:flex;">'+icon(tg.icon,12)+'</span>'+esc(tg.label)+'</button>';}).join('');
+  const tagsBlock='<div style="display:flex;align-items:flex-start;gap:10px;flex-wrap:wrap;"><span style="font-size:8.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--faint);flex:none;padding-top:6px;">Tags</span><div style="display:flex;flex-wrap:wrap;gap:5px;flex:1;">'+(chips||'<span style="font-size:10.5px;color:var(--faint);padding-top:5px;">Create tags in the Tasks view first.</span>')+'</div></div>';
+  const actions='<div style="display:flex;align-items:center;gap:8px;padding-top:2px;"><button data-act="lkDownload" data-id="'+it.id+'" style="display:flex;align-items:center;gap:6px;padding:7px 13px;border:1px solid var(--line-strong);border-radius:var(--r2);background:transparent;color:var(--dim);font-size:11px;letter-spacing:.05em;text-transform:uppercase;cursor:pointer;"><span style="display:flex;">'+icon('download',13)+'</span> Download</button><span style="flex:1;"></span><button data-act="lkDelete" data-id="'+it.id+'" style="display:flex;align-items:center;gap:6px;padding:7px 13px;border:1px solid #4a2c29;border-radius:var(--r2);background:transparent;color:#e0806a;font-size:11px;letter-spacing:.05em;text-transform:uppercase;cursor:pointer;"><span style="display:flex;">'+icon('trash',13)+'</span> Delete</button></div>';
+  const dataCol='<div style="flex:1 1 300px;min-width:min(260px,100%);display:flex;flex-direction:column;gap:13px;">'+metaGrid+taskBlock+tagsBlock+actions+'</div>';
+  return '<div style="border-top:1px solid var(--line);background:var(--surface2);padding:15px;"><div style="display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start;">'+prevCol+dataCol+'</div></div>';
+}
+function wireLkAudio(scope){scope.querySelectorAll('audio[data-lk]').forEach(a=>{if(a._wired)return;a._wired=true;const id=a.dataset.lk;
+  const upd=()=>{const c=document.getElementById('otk-wave-'+id);if(c)lkDrawWave(c,id);const t=document.getElementById('otk-time-'+id);if(t)t.textContent=fmtDur(a.currentTime)+' / '+fmtDur(a.duration||(lkMedia[id]&&lkMedia[id].duration)||0);};
+  const setIcon=()=>{const b=document.getElementById('otk-play-'+id);if(b)b.innerHTML=icon(a.paused?'play':'pause',15);};
+  a.addEventListener('timeupdate',upd);a.addEventListener('loadedmetadata',upd);a.addEventListener('play',setIcon);a.addEventListener('pause',setIcon);a.addEventListener('ended',()=>{setIcon();upd();});requestAnimationFrame(upd);});}
+function refreshLkList(){const c=document.getElementById('otk-lklist');if(c){c.innerHTML=lockerListHTML();wireLkAudio(c);}}
 function lockerViewerHTML(){
-  if(!lkOpen)return '';
-  const item=lockerIndex.find(x=>x.id===lkOpen);const k=item?mediaKind(item.type,item.name):'file';
-  let inner;
-  if(lkErr)inner='<div style="color:#e0705a;padding:30px;font-size:12px;max-width:400px;text-align:center;">'+esc(lkErr)+'</div>';
-  else if(!lkBlobUrl)inner='<div style="padding:40px;color:var(--dim);font-size:12px;">Decrypting…</div>';
-  else if(k==='image')inner='<img src="'+lkBlobUrl+'" style="max-width:100%;max-height:78vh;display:block;border-radius:var(--r2);" />';
-  else if(k==='audio')inner='<audio controls autoplay src="'+lkBlobUrl+'" style="width:min(80vw,520px);"></audio>';
-  else if(k==='video')inner='<video controls autoplay src="'+lkBlobUrl+'" style="max-width:100%;max-height:78vh;border-radius:var(--r2);"></video>';
-  else if(k==='pdf')inner='<iframe src="'+lkBlobUrl+'" style="width:min(90vw,900px);height:80vh;border:none;border-radius:var(--r2);background:#fff;"></iframe>';
-  else if(k==='text')inner='<pre style="width:min(80vw,720px);max-height:78vh;overflow:auto;white-space:pre-wrap;word-break:break-word;font-family:inherit;font-size:12.5px;line-height:1.6;color:var(--text2);margin:0;background:var(--surface2);border:1px solid var(--line);border-radius:var(--r2);padding:14px;">'+esc(lkText)+'</pre>';
-  else inner='<div style="padding:30px;text-align:center;color:var(--dim);font-size:12px;">No preview for this type.<br/><button data-act="lkDownload" data-id="'+lkOpen+'" style="margin-top:12px;padding:8px 16px;border:1px solid var(--accent-soft);border-radius:var(--r2);background:transparent;color:var(--accent);cursor:pointer;font-family:inherit;">Download</button></div>';
-  return '<div data-act="lkCloseViewer" style="position:fixed;inset:0;z-index:70;background:rgba(6,5,4,.85);display:flex;align-items:center;justify-content:center;padding:20px;"><div data-act="stop" style="max-width:100%;max-height:100%;display:flex;flex-direction:column;gap:10px;"><div style="display:flex;align-items:center;gap:10px;color:var(--text);"><span style="flex:1;min-width:0;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(item?item.name:'')+'</span>'+(item?'<button data-act="lkDownload" data-id="'+lkOpen+'" title="Download" style="display:flex;padding:6px;border:none;background:transparent;color:var(--dim);cursor:pointer;">'+icon('gain',16)+'</button>':'')+'<button data-act="lkCloseViewer" title="Close" style="display:flex;padding:6px;border:none;background:transparent;color:var(--dim);cursor:pointer;">'+icon('x',18)+'</button></div><div style="display:flex;align-items:center;justify-content:center;overflow:auto;">'+inner+'</div></div></div>';
+  if(!view.lkLightbox)return '';
+  const it=lockerIndex.find(x=>x.id===view.lkLightbox);if(!it)return '';
+  const m=lkMedia[it.id],k=mediaKind(it.type,it.name);let inner;
+  if(m&&m.err)inner='<div style="color:#e0705a;padding:30px;font-size:12px;max-width:400px;text-align:center;">'+esc(m.err)+'</div>';
+  else if(!m||!m.url)inner='<div style="padding:40px;color:var(--dim);font-size:12px;">Decrypting…</div>';
+  else if(k==='image')inner='<img src="'+m.url+'" style="max-width:88vw;max-height:82vh;display:block;object-fit:contain;" />';
+  else if(k==='video')inner='<video src="'+m.url+'" controls autoplay style="max-width:88vw;max-height:82vh;background:#000;display:block;"></video>';
+  else if(k==='pdf')inner='<iframe src="'+m.url+'" style="width:88vw;height:82vh;border:none;background:#fff;"></iframe>';
+  else inner='<img src="'+m.url+'" style="max-width:88vw;max-height:82vh;object-fit:contain;" />';
+  let cap=esc(it.name);if(m&&m.w&&m.h)cap+='  ·  '+m.w+'×'+m.h;
+  return '<div data-act="lkLightboxClose" style="position:fixed;inset:0;z-index:90;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:26px;background:rgba(6,6,6,.92);">'
+    +'<div style="display:flex;align-items:center;gap:12px;width:100%;max-width:1000px;"><span style="font-size:12px;color:var(--text2);flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+cap+'</span>'
+    +'<button data-act="lkDownload" data-id="'+it.id+'" title="Download" style="display:flex;flex:none;width:34px;height:34px;align-items:center;justify-content:center;border:1px solid var(--line-strong);border-radius:var(--r2);background:var(--surface2);color:var(--text2);cursor:pointer;">'+icon('download',15)+'</button>'
+    +'<button data-act="lkLightboxClose" title="Close" style="display:flex;flex:none;width:34px;height:34px;align-items:center;justify-content:center;border:1px solid var(--line-strong);border-radius:var(--r2);background:var(--surface2);color:var(--text2);cursor:pointer;">'+icon('x',16)+'</button></div>'
+    +'<div data-act="stop" style="display:flex;align-items:center;justify-content:center;overflow:hidden;border:1px solid var(--line);border-radius:var(--r1);background:#0a0a0a;">'+inner+'</div></div>';
 }
 
 let syncOpen=false;
@@ -331,7 +454,7 @@ function filteredTasks(proj){
 }
 
 /* ============================ handlers ============================ */
-function selectProject(id){view.projectId=id;view.tags=[];view.search='';view.drawer=false;view.expanded={};view.titleEdit=null;view.section='tasks';render();}
+function selectProject(id){lockerRevokeMedia();view.lkExpanded={};view.projectId=id;view.tags=[];view.search='';view.drawer=false;view.expanded={};view.titleEdit=null;view.section='tasks';render();}
 function selectTag(id){if(id==='ALL'){view.tags=[];}else{const i=view.tags.indexOf(id);if(i>=0)view.tags.splice(i,1);else view.tags.push(id);}render();}
 function toggleTags(){view.tagsOpen=!view.tagsOpen;render();}
 function toggleEditorTags(id){view.editorTagsOpen[id]=!view.editorTagsOpen[id];render();}
@@ -595,6 +718,8 @@ function attachInputs(scope){
     if(view.titleEdit){const tt=document.querySelector('.otk-title[data-id="'+view.titleEdit+'"]');if(tt){tt.focus();const L=tt.value.length;try{tt.setSelectionRange(L,L);}catch(e){}}}
     const fi=document.getElementById('otk-file');if(fi)fi.addEventListener('change',()=>{lockerUpload(fi.files);fi.value='';});
     const dz=document.getElementById('otk-dz');if(dz){dz.addEventListener('dragover',e=>{e.preventDefault();dz.style.borderColor='var(--accent)';});dz.addEventListener('dragleave',()=>{dz.style.borderColor='';});dz.addEventListener('drop',e=>{e.preventDefault();dz.style.borderColor='';if(e.dataTransfer&&e.dataTransfer.files)lockerUpload(e.dataTransfer.files);});}
+    const lks=document.getElementById('otk-lksearch');if(lks)lks.addEventListener('input',()=>{view.lkSearch=lks.value;refreshLkList();});
+    wireLkAudio(document);
   }
 }
 document.getElementById('app').addEventListener('click',e=>{
@@ -632,10 +757,21 @@ document.getElementById('app').addEventListener('click',e=>{
     case 'toggleDeskNav':view.deskNav=!view.deskNav;render();break;
     case 'setSection':setSection(d.s);break;
     case 'lkPick':{const fi=document.getElementById('otk-file');if(fi)fi.click();break;}
-    case 'lkOpen':lockerOpen(d.id);break;
+    case 'lkExpand':{const id=d.id;if(view.lkExpanded[id])delete view.lkExpanded[id];else{view.lkExpanded[id]=true;lockerEnsureMedia(id);}render();break;}
     case 'lkDownload':lockerDownload(d.id);break;
     case 'lkDelete':lockerDelete(d.id);break;
-    case 'lkCloseViewer':lockerCloseViewer();break;
+    case 'lkToggleTag':lockerToggleTag(d.id,d.tid);break;
+    case 'lkAttachOpen':view.lkAttachOpen=(view.lkAttachOpen===d.id?null:d.id);render();break;
+    case 'lkAttach':lockerAttach(d.id,d.tid);break;
+    case 'lkUnlink':lockerUnlink(d.id);break;
+    case 'lkFilterToggle':view.lkFilterOpen=!view.lkFilterOpen;render();break;
+    case 'lkFilterClose':view.lkFilterOpen=false;render();break;
+    case 'lkSetFilter':view.lkFilter=d.f;view.lkFilterOpen=false;render();break;
+    case 'lkSetSort':view.lkSort=d.s;view.lkFilterOpen=false;render();break;
+    case 'lkEnlarge':view.lkLightbox=d.id;lockerEnsureMedia(d.id);render();break;
+    case 'lkLightboxClose':view.lkLightbox=null;render();break;
+    case 'lkPlay':{const a=document.getElementById('otk-audio-'+d.id);if(a){if(a.paused){document.querySelectorAll('audio[data-lk]').forEach(o=>{if(o!==a)o.pause();});a.play().catch(()=>{});}else a.pause();}break;}
+    case 'lkSeek':{const a=document.getElementById('otk-audio-'+d.id);if(a){const r=el.getBoundingClientRect();const frac=Math.max(0,Math.min(1,(e.clientX-r.left)/r.width));const dur=a.duration||(lkMedia[d.id]&&lkMedia[d.id].duration)||0;if(dur){a.currentTime=frac*dur;const c=document.getElementById('otk-wave-'+d.id);if(c)lkDrawWave(c,d.id);}}break;}
   }
 });
 document.getElementById('app').addEventListener('contextmenu',e=>{const el=e.target.closest('[data-act=selectProject]');if(el){e.preventDefault();deleteProject(el.dataset.id);}});
@@ -649,7 +785,7 @@ MOBILE_Q.addEventListener('change',()=>{_wasMobile=isMobile();render();});
 window.addEventListener('resize',()=>{if(isMobile()!==_wasMobile){_wasMobile=isMobile();render();}});
 function canAutoPull(){if(!cloudOn()||pushTimer||!navigator.onLine)return false;if(picker.open||promptS.open||syncOpen||settingsOpen)return false;const a=document.activeElement,t=a&&a.tagName;if(t==='TEXTAREA')return false;if(t==='INPUT'&&(a.value||'').trim())return false;return true;}
 setInterval(()=>{if(canAutoPull())cloudPull();},45000);
-setInterval(()=>{if(view.section==='locker'&&lockerReady()&&!Object.keys(lkUploads).length&&!lkOpen){const b=lockerIndex.map(i=>i.id).join(',');lockerPull().then(()=>{if(lockerIndex.map(i=>i.id).join(',')!==b)render();});}},5000);
+setInterval(()=>{if(view.section==='locker'&&lockerReady()&&!Object.keys(lkUploads).length&&!view.lkLightbox){const b=lockerIndex.map(i=>i.id).join(',');lockerPull().then(()=>{if(lockerIndex.map(i=>i.id).join(',')!==b)render();});}},5000);
 window.addEventListener('online',()=>{if(cloudOn())cloudPull();});
 })();
 </script>
