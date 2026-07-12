@@ -1,8 +1,4 @@
-# Backend — Cloudflare Worker (media Locker). Deployed via the Cloudflare
-# dashboard, must NEVER be served by GitHub Pages. Keep it local-only.
-backend/
-
-# Design sources (not needed by the app)
+# Design sources (Affinity files, icon exports) — not needed to run the app
 Affinity/
 Icones/
 
@@ -10,3 +6,7 @@ Icones/
 .DS_Store
 Thumbs.db
 *.tmp
+
+# NOTE: backend/locker-worker.js IS versioned on purpose — it is the Cloudflare
+# Worker source used by the optional Locker, contains no secrets (everything is
+# read from environment variables/bindings), and is part of the setup procedure.
