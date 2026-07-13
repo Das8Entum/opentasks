@@ -7,6 +7,11 @@ Icones/
 Thumbs.db
 *.tmp
 
+# Claude bridge: plaintext tasks dump (decrypted LOCALLY by decrypt-tasks.js).
+# NEVER commit — this is the only plaintext copy of the tasks outside localStorage.
+tasks-plain.json
+decrypt-tasks.js
+
 # NOTE: backend/locker-worker.js IS versioned on purpose — it is the Cloudflare
 # Worker source used by the optional Locker, contains no secrets (everything is
 # read from environment variables/bindings), and is part of the setup procedure.
