@@ -32,7 +32,7 @@ I wanted a notepad replacement to jot DSP project ideas, sorted by project and c
 **Optional layers** (each independent — see [Setup](#setup))
 - 🔄 **Sync** across devices via a private **GitHub Gist**
 - 🔐 **Vault**: end-to-end encryption of your data (AES-256-GCM)
-- 🗄️ **Locker**: an encrypted media tunnel — upload files on one device, read them on another, previewed in-app (image / audio / video / PDF / text)
+- 🗄️ **Locker**: an encrypted media tunnel — upload files on one device, read them on another, previewed in-app (image / audio / video / PDF / text). Nested folders (create, rename, move, delete), import straight from the photo gallery, paste screenshots with Ctrl+V, copy images/text back to the clipboard, and on Android **share files to OpenTasks** from any app
 
 ## What you need (by layer)
 
@@ -99,6 +99,10 @@ Files are encrypted **in your browser** before upload; the backend only relays c
 - In OpenTasks → **Sync → Locker**: paste the **Worker URL** and **LOCKER_TOKEN** → **Connect**.
 - Do the same on each device. Now drop files in the **Locker** section on one device and open them on another.
 
+**e. (Android) Share to OpenTasks**
+- Install OpenTasks as an app (Chrome menu → *Install app*). It then appears in the Android **share sheet**: select photos or files in any app → *Share* → **OpenTasks**, and they upload encrypted into the folder you last had open in the Locker.
+- Already installed before this feature existed? Chrome refreshes the installed app within a day; to get it immediately, uninstall and reinstall the app.
+
 > Migrating to your own NAS later is trivial by design: the client only stores a base URL + token. Point it at your NAS (same API), copy the ciphertext objects over, and your keys/index are unchanged.
 
 ---
@@ -116,7 +120,8 @@ Files are encrypted **in your browser** before upload; the backend only relays c
 - **One IIFE** in `index.html`. State is a plain object; `render()` rebuilds `#app` from `renderDesktop()`/`renderMobile()`; clicks are handled by delegated `data-act` attributes.
 - **Sync**: debounced `PATCH` to the gist; auto-pull on load and on a timer (paused while editing). Backward-compatible data migration on load.
 - **Crypto**: Web Crypto only (`crypto.subtle`). Encrypted envelope `{enc, salt, iv, ct}`; the salt travels in the envelope and is adopted on pull.
-- **Locker**: files are chunked (4 MB), each chunk AES-GCM-encrypted (12-byte IV prepended) and `PUT` to the Worker at `/o/<key>`; reassembled and decrypted on open. Near-real-time is a 5 s index poll while the Locker is open.
+- **Locker**: files are chunked (4 MB), each chunk AES-GCM-encrypted (12-byte IV prepended) and `PUT` to the Worker at `/o/<key>`; reassembled and decrypted on open. Near-real-time is a 5 s index poll while the Locker is open. The encrypted index (files, folders, tombstones for deletions) is **merged** on every pull and push — newest edit wins per item — so two devices working at the same time never erase each other's changes.
+- **Share target** (`sw.js`): a minimal service worker that only intercepts the Android share POST, parks the files in IndexedDB and reopens the app to upload them. It caches nothing, so app updates are never stuck behind a stale cache.
 - **Backend** (`backend/locker-worker.js`): a ~100-line Cloudflare Worker that checks a bearer token and streams bytes to/from R2. Nothing else.
 
 ## Data & portability

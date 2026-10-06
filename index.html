@@ -138,6 +138,11 @@ const GLYPHS={
   expand:[['path',{d:'M4 9 V4 H9 M15 4 H20 V9 M20 15 V20 H15 M9 20 H4 V15'}]],
   copy:[['rect',{x:9,y:9,width:11,height:11,rx:2}],['path',{d:'M15 9 V6 A2 2 0 0 0 13 4 H6 A2 2 0 0 0 4 6 V13 A2 2 0 0 0 6 15 H9'}]],
   flag:[['path',{d:'M6 21 V4'}],['path',{d:'M6 4.5 H17 L14 8.5 L17 12.5 H6'}]],
+  folderplus:[['path',{d:'M3.5 7.5 A1.5 1.5 0 0 1 5 6 H9.3 L11.3 8.3 H19 A1.5 1.5 0 0 1 20.5 9.8 V16.5 A1.5 1.5 0 0 1 19 18 H5 A1.5 1.5 0 0 1 3.5 16.5 Z'}],['path',{d:'M12 10.6 V15.6 M9.5 13.1 H14.5'}]],
+  foldermove:[['path',{d:'M3.5 7.5 A1.5 1.5 0 0 1 5 6 H9.3 L11.3 8.3 H19 A1.5 1.5 0 0 1 20.5 9.8 V16.5 A1.5 1.5 0 0 1 19 18 H5 A1.5 1.5 0 0 1 3.5 16.5 Z'}],['path',{d:'M9.2 13.1 H14.6 M12.6 11.1 L14.6 13.1 L12.6 15.1'}]],
+  chevright:[['path',{d:'M10 7 L15 12 L10 17'}]],
+  dots:[['circle',{cx:6,cy:12,r:1.4,fill:'currentColor'}],['circle',{cx:12,cy:12,r:1.4,fill:'currentColor'}],['circle',{cx:18,cy:12,r:1.4,fill:'currentColor'}]],
+  share:[['path',{d:'M12 14.5 V3.8 M8 7.6 L12 3.8 L16 7.6'}],['path',{d:'M7 10.5 H6 A1 1 0 0 0 5 11.5 V19.2 A1 1 0 0 0 6 20.2 H18 A1 1 0 0 0 19 19.2 V11.5 A1 1 0 0 0 18 10.5 H17'}]],
   grip:[['circle',{cx:9,cy:6,r:1.3,fill:'currentColor'}],['circle',{cx:15,cy:6,r:1.3,fill:'currentColor'}],['circle',{cx:9,cy:12,r:1.3,fill:'currentColor'}],['circle',{cx:15,cy:12,r:1.3,fill:'currentColor'}],['circle',{cx:9,cy:18,r:1.3,fill:'currentColor'}],['circle',{cx:15,cy:18,r:1.3,fill:'currentColor'}]],
 };
 function svgAttrs(o){return Object.keys(o).map(k=>k+'="'+o[k]+'"').join(' ');}
@@ -164,7 +169,7 @@ let settings=loadSettings();
 
 /* ============================ state ============================ */
 let store=load();
-let view={projectId:null,tags:[],search:'',composerIcon:'sine',expanded:{},drawer:false,searchOpen:false,tagsOpen:false,editorTagsOpen:{},titleEdit:null,deskNav:true,section:'tasks',lkExpanded:{},lkFilter:'ALL',lkSort:'recent',lkFilterOpen:false,lkSearch:'',lkAttachOpen:null,lkLightbox:null};
+let view={projectId:null,tags:[],search:'',composerIcon:'sine',expanded:{},drawer:false,searchOpen:false,tagsOpen:false,editorTagsOpen:{},titleEdit:null,deskNav:true,section:'tasks',lkExpanded:{},lkFilter:'ALL',lkSort:'recent',lkFilterOpen:false,lkSearch:'',lkAttachOpen:null,lkLightbox:null,lkFolder:(()=>{try{return localStorage.getItem('otk.lkfolder')||null;}catch(e){return null;}})(),lkFolderMenu:null,lkMove:null};
 let subDraft={};
 let picker={open:false,target:null};
 let promptS={open:false,kind:'project',value:''};
@@ -251,7 +256,8 @@ const LK_URL="locker.url", LK_TOKEN="locker.token", LK_CHUNK=4*1024*1024;
 const locker={url:localStorage.getItem(LK_URL)||"", token:localStorage.getItem(LK_TOKEN)||""};
 const lockerOn=()=>!!(locker.url&&locker.token);
 const lockerReady=()=>lockerOn()&&cloudOn()&&encOn();
-let lockerIndex=[], lockerLoaded=false, lkUploads={}, lkErr="";
+let lockerIndex=[], lockerFolders=[], lkTomb={}, lockerLoaded=false, lkUploads={}, lkErr="";
+const LK_FOLDER_KEY="otk.lkfolder", LK_TOMB_TTL=90*864e5;
 const KINDMETA={audio:{icon:'wave',label:'Audio'},image:{icon:'image',label:'Image'},video:{icon:'video',label:'Video'},pdf:{icon:'doc',label:'PDF'},text:{icon:'text',label:'Text'},file:{icon:'archive',label:'File'}};
 let lkMedia={}, lkAudioCtx=null, _lkPushT=null;
 async function encJSON(obj){const key=await getKey();const iv=crypto.getRandomValues(new Uint8Array(12));const ct=await crypto.subtle.encrypt({name:"AES-GCM",iv},key,new TextEncoder().encode(JSON.stringify(obj)));return JSON.stringify({enc:"v1",salt:encSalt,iv:b64e(iv),ct:b64e(ct)});}
@@ -264,34 +270,73 @@ function lkAuth(){return {Authorization:"Bearer "+locker.token};}
 async function lkPut(k,bytes){const r=await fetch(lkBase()+"/o/"+encodeURIComponent(k),{method:"PUT",headers:lkAuth(),body:bytes});if(!r.ok)throw new Error("PUT "+r.status+" "+(await r.text()).slice(0,120));}
 async function lkGet(k){const r=await fetch(lkBase()+"/o/"+encodeURIComponent(k),{headers:lkAuth()});if(!r.ok)throw new Error("GET "+r.status);return new Uint8Array(await r.arrayBuffer());}
 async function lkDelObj(k){try{await fetch(lkBase()+"/o/"+encodeURIComponent(k),{method:"DELETE",headers:lkAuth()});}catch(e){}}
+/* ---- locker index sync ----
+   The index (items + folders + tombstones) is MERGED on every pull and push instead of overwritten, so a
+   phone uploading while the PC creates a folder never drops the other device's changes. Each object
+   carries `mt` (last modified); the newer copy wins. Deleted ids are kept as tombstones for 90 days. */
+function lkMergeState(a,b){
+  const del={};[a.deleted||{},b.deleted||{}].forEach(src=>{for(const k in src)del[k]=Math.max(del[k]||0,+src[k]||0);});
+  const now=Date.now();for(const k in del)if(now-del[k]>LK_TOMB_TTL)delete del[k];
+  const stamp=o=>+(o.mt||o.ts||0);
+  const join=(x,y)=>{const m=new Map();(x||[]).forEach(o=>{if(o&&o.id&&!del[o.id])m.set(o.id,o);});(y||[]).forEach(o=>{if(!o||!o.id||del[o.id])return;const c=m.get(o.id);if(!c||stamp(o)>stamp(c))m.set(o.id,o);});return [...m.values()];};
+  return {items:join(a.items,b.items),folders:join(a.folders,b.folders),deleted:del};
+}
+function lkLocalState(){return {items:lockerIndex,folders:lockerFolders,deleted:lkTomb};}
+function lkSig(){return lockerIndex.map(i=>i.id+':'+(i.mt||i.ts||0)).join(',')+'|'+lockerFolders.map(f=>f.id+':'+(f.mt||0)).join(',');}
+function lkApply(st){lockerIndex=st.items;lockerFolders=st.folders;lkTomb=st.deleted;if(view.lkFolder&&!lockerFolders.some(f=>f.id===view.lkFolder))lkSetFolder(null,true);}
+async function lockerFetchRemote(){
+  const r=await fetch("https://api.github.com/gists/"+cloud.id,{headers:ghHeaders()});if(!r.ok)throw new Error("HTTP "+r.status);
+  const g=await r.json();const f=g.files&&g.files["locker.json"];if(!f)return {items:[],folders:[],deleted:{}};
+  let c=f.content;if(f.truncated&&f.raw_url)c=await(await fetch(f.raw_url)).text();
+  const p=JSON.parse(c);const d=(p&&p.enc)?await decJSON(p):p;
+  return {items:Array.isArray(d&&d.items)?d.items:[],folders:Array.isArray(d&&d.folders)?d.folders:[],deleted:(d&&d.deleted&&typeof d.deleted==='object')?d.deleted:{}};
+}
 async function lockerPull(){
   if(!cloudOn()||!encOn())return;
-  try{const r=await fetch("https://api.github.com/gists/"+cloud.id,{headers:ghHeaders()});if(!r.ok)throw new Error("HTTP "+r.status);
-    const g=await r.json();const f=g.files&&g.files["locker.json"];
-    if(f){let c=f.content;if(f.truncated&&f.raw_url)c=await(await fetch(f.raw_url)).text();const p=JSON.parse(c);const data=(p&&p.enc)?await decJSON(p):p;lockerIndex=Array.isArray(data&&data.items)?data.items:[];}
-    else lockerIndex=[];
-    lockerLoaded=true;lkErr="";
-  }catch(e){lkErr=e.name==="OperationError"?"Wrong passphrase.":("Index error: "+e.message);}
+  try{lkApply(lkMergeState(lkLocalState(),await lockerFetchRemote()));lockerLoaded=true;lkErr="";}
+  catch(e){lkErr=e.name==="OperationError"?"Wrong passphrase.":("Index error: "+e.message);}
 }
-async function lockerPush(){if(!cloudOn()||!encOn())return;const content=await encJSON({items:lockerIndex});const body={files:{}};body.files["locker.json"]={content};const r=await fetch("https://api.github.com/gists/"+cloud.id,{method:"PATCH",headers:ghHeaders(true),body:JSON.stringify(body)});if(!r.ok)throw new Error("index push "+r.status);}
+let _lkPushQ=Promise.resolve();
+function lockerPush(){
+  if(!cloudOn()||!encOn())return Promise.resolve();
+  const run=async()=>{const before=lkSig();
+    try{lkApply(lkMergeState(lkLocalState(),await lockerFetchRemote()));}catch(e){}
+    const content=await encJSON({v:2,items:lockerIndex,folders:lockerFolders,deleted:lkTomb});
+    const r=await fetch("https://api.github.com/gists/"+cloud.id,{method:"PATCH",headers:ghHeaders(true),body:JSON.stringify({files:{"locker.json":{content}}})});
+    if(!r.ok)throw new Error("index push "+r.status);
+    if(lkSig()!==before&&view.section==='locker')lkRefresh();};
+  const p=_lkPushQ.then(run,run);_lkPushQ=p.catch(()=>{});return p;   // our own pushes never interleave
+}
+/* re-render without stealing focus from the locker search box */
+function lkRefresh(){const a=document.activeElement;if(a&&a.id==='otk-lksearch'){refreshLkList();return;}render();}
 function guessType(name){const e=(name.split(".").pop()||"").toLowerCase();const m={jpg:"image/jpeg",jpeg:"image/jpeg",png:"image/png",gif:"image/gif",webp:"image/webp",svg:"image/svg+xml",avif:"image/avif",bmp:"image/bmp",mp3:"audio/mpeg",wav:"audio/wav",ogg:"audio/ogg",oga:"audio/ogg",m4a:"audio/mp4",aac:"audio/aac",flac:"audio/flac",mp4:"video/mp4",webm:"video/webm",mov:"video/quicktime",mkv:"video/x-matroska",pdf:"application/pdf",txt:"text/plain",md:"text/markdown",csv:"text/csv",log:"text/plain",json:"application/json"};return m[e]||"";}
 function mediaKind(t,name){t=t||guessType(name);const e=((name||'').split('.').pop()||'').toLowerCase();if(t.startsWith("image/"))return "image";if(t.startsWith("audio/"))return "audio";if(t.startsWith("video/"))return "video";if(t==="application/pdf"||e==="pdf")return "pdf";if(t.startsWith("text/")||t==="application/json"||["txt","md","markdown","csv","log","json","js","ts","tsx","jsx","cpp","h","hpp","cc","c","rs","py","go","css","html","xml","yaml","yml","java","gen","genexpr","maxpat"].includes(e))return "text";return "file";}
 function kindIcon(k){return {image:"scope",audio:"sine",video:"triangle",pdf:"square",text:"clock",file:"patch"}[k]||"patch";}
 function fmtSize(b){if(b<1024)return b+" B";if(b<1048576)return (b/1024).toFixed(0)+" KB";if(b<1073741824)return (b/1048576).toFixed(1)+" MB";return (b/1073741824).toFixed(2)+" GB";}
-async function lockerUpload(fileList){
-  const files=[...fileList];if(!files.length)return;
-  if(!lockerReady()){lkErr="Locker needs Sync connected + a passphrase + a Worker URL/token.";render();return;}
+/* uploads into the current folder (or opts.folder); resolves to one boolean per file */
+async function lockerUpload(fileList,opts){
+  const files=[...fileList];if(!files.length)return [];
+  if(!lockerReady()){lkErr="Locker needs Sync connected + a passphrase + a Worker URL/token.";render();return files.map(()=>false);}
+  let folder=(opts&&opts.folder!==undefined)?opts.folder:view.lkFolder;if(folder&&!lkFolder(folder))folder=null;
+  const ok=[];
   for(const file of files){
-    const id="f"+uid();const total=Math.max(1,Math.ceil(file.size/LK_CHUNK));
-    lkUploads[id]={name:file.name,done:0,total,err:""};render();
+    const id="f"+uid();const total=Math.max(1,Math.ceil(file.size/LK_CHUNK));const name=file.name||('file-'+stampName());
+    lkUploads[id]={name,done:0,total,err:""};render();
     try{
       for(let i=0;i<total;i++){const buf=await file.slice(i*LK_CHUNK,(i+1)*LK_CHUNK).arrayBuffer();await lkPut(id+"/"+i, await encBytes(buf));lkUploads[id].done=i+1;lkProg();}
-      lockerIndex.unshift({id,name:file.name,type:file.type||guessType(file.name),size:file.size,chunks:total,ts:Date.now()});
+      const now=Date.now();lockerIndex.unshift({id,name,type:file.type||guessType(name),size:file.size,chunks:total,ts:now,mt:now,folder:folder||null});
       await lockerPush();delete lkUploads[id];render();
       const _it=lockerIndex.find(x=>x.id===id);if(_it){lkMedia[id]={loading:true};lockerBuildMedia(file,_it).then(m=>{lkMedia[id]=m;if(view.section==='locker'&&(view.lkExpanded[id]||view.lkLightbox===id))render();}).catch(()=>{delete lkMedia[id];});}
-    }catch(e){lkUploads[id].err=String(e.message||e);render();}
+      ok.push(true);
+    }catch(e){lkUploads[id].err=String(e.message||e);render();ok.push(false);}
   }
+  return ok;
 }
+function stampName(){const d=new Date(),p=n=>String(n).padStart(2,'0');return d.getFullYear()+p(d.getMonth()+1)+p(d.getDate())+'-'+p(d.getHours())+p(d.getMinutes())+p(d.getSeconds());}
+function fmtWhen(ts){if(!ts)return '';const age=Date.now()-ts;
+  if(age>=0&&age<864e5){try{return new Date(ts).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});}catch(e){}}
+  try{const d=new Date(ts),other=d.getFullYear()!==new Date().getFullYear();return d.toLocaleDateString('en-GB',other?{day:'2-digit',month:'short',year:'numeric'}:{day:'2-digit',month:'short'});}catch(e){return '';}}
+function fmtStamp(ts){try{return new Date(ts).toLocaleString('en-GB',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});}catch(e){return '';}}
 function lkProg(){document.querySelectorAll(".otk-lkprog").forEach(el=>{const u=lkUploads[el.dataset.id];if(u)el.style.width=Math.round(u.done/u.total*100)+"%";});}
 async function lockerBlob(item){const parts=[];for(let i=0;i<item.chunks;i++)parts.push(await decBytes(await lkGet(item.id+"/"+i)));return new Blob(parts,{type:item.type||"application/octet-stream"});}
 function lkAC(){if(!lkAudioCtx){const AC=window.AudioContext||window.webkitAudioContext;lkAudioCtx=new AC();}if(lkAudioCtx.state==='suspended')lkAudioCtx.resume();return lkAudioCtx;}
@@ -325,13 +370,97 @@ async function lockerPrefetch(){
 function lockerRevokeMedia(){Object.keys(lkMedia).forEach(k=>{const m=lkMedia[k];try{if(m&&m.url)URL.revokeObjectURL(m.url);}catch(e){}});lkMedia={};}
 function lkInline(s){s=esc(s);s=s.replace(/\*\*([^*]+)\*\*/g,'<strong style="color:var(--text);font-weight:700;">$1</strong>');return s.replace(/`([^`]+)`/g,'<code style="color:var(--text);background:var(--bg);padding:1px 4px;border-radius:3px;font-size:11px;">$1</code>');}
 function lkMd(txt){const lines=(txt||'').split('\n');let h='<div style="padding:14px 16px;">';for(const ln of lines){if(/^##\s/.test(ln))h+='<div style="font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--text);margin:10px 0 4px;">'+esc(ln.slice(3))+'</div>';else if(/^#\s/.test(ln))h+='<div style="font-size:15px;font-weight:700;color:var(--text);margin:0 0 6px;">'+esc(ln.slice(2))+'</div>';else if(/^-\s/.test(ln))h+='<div style="display:flex;gap:7px;color:var(--text2);font-size:12px;line-height:1.6;"><span style="color:var(--dim);">·</span><span>'+lkInline(ln.slice(2))+'</span></div>';else if(!ln.trim())h+='<div style="height:6px;"></div>';else h+='<div style="color:var(--text2);font-size:12px;line-height:1.65;">'+lkInline(ln)+'</div>';}return h+'</div>';}
-function lockerToggleTag(id,tid){const it=lockerIndex.find(x=>x.id===id);if(!it)return;it.tags=it.tags||[];const i=it.tags.indexOf(tid);if(i>=0)it.tags.splice(i,1);else it.tags.push(tid);render();lockerPushDebounced();}
-function lockerAttach(id,tid){const it=lockerIndex.find(x=>x.id===id);if(!it)return;it.task=tid;view.lkAttachOpen=null;render();lockerPushDebounced();}
-function lockerUnlink(id){const it=lockerIndex.find(x=>x.id===id);if(!it)return;it.task=null;render();lockerPushDebounced();}
+function lockerToggleTag(id,tid){const it=lockerIndex.find(x=>x.id===id);if(!it)return;it.tags=it.tags||[];const i=it.tags.indexOf(tid);if(i>=0)it.tags.splice(i,1);else it.tags.push(tid);it.mt=Date.now();render();lockerPushDebounced();}
+function lockerAttach(id,tid){const it=lockerIndex.find(x=>x.id===id);if(!it)return;it.task=tid;it.mt=Date.now();view.lkAttachOpen=null;render();lockerPushDebounced();}
+function lockerUnlink(id){const it=lockerIndex.find(x=>x.id===id);if(!it)return;it.task=null;it.mt=Date.now();render();lockerPushDebounced();}
 function lockerPushDebounced(){clearTimeout(_lkPushT);_lkPushT=setTimeout(()=>{lockerPush().catch(()=>{});},900);}
+
+/* ---- folders ---- */
+function lkFolder(id){return id?lockerFolders.find(f=>f.id===id)||null:null;}
+function lkFolderPath(id){const out=[];let f=lkFolder(id),guard=0;while(f&&guard++<64){out.unshift(f);f=lkFolder(f.parent);}return out;}
+function lkFolderLabel(id){const p=lkFolderPath(id);return p.length?p.map(f=>f.name).join(' / '):'Locker';}
+function lkByName(a,b){return a.name.localeCompare(b.name,undefined,{sensitivity:'base',numeric:true});}
+function lkSubfolders(pid){return lockerFolders.filter(f=>(f.parent||null)===(pid||null)).sort(lkByName);}
+function lkDescendants(id){const out=new Set([id]);let grew=true;while(grew){grew=false;lockerFolders.forEach(f=>{if(f.parent&&out.has(f.parent)&&!out.has(f.id)){out.add(f.id);grew=true;}});}return out;}
+function lkFolderTree(){const out=[];const walk=(pid,depth)=>{lkSubfolders(pid).forEach(f=>{out.push({f,depth});if(depth<32)walk(f.id,depth+1);});};walk(null,0);return out;}
+/* recursive file count / size / last import per folder, in one pass */
+function lkFolderStats(){const st={};lockerIndex.forEach(it=>{let f=lkFolder(it.folder),g=0;while(f&&g++<64){const s=st[f.id]||(st[f.id]={n:0,bytes:0,last:0});s.n++;s.bytes+=it.size||0;s.last=Math.max(s.last,it.ts||0);f=lkFolder(f.parent);}});return st;}
+function lkSetFolder(id,silent){view.lkFolder=id||null;try{if(view.lkFolder)localStorage.setItem(LK_FOLDER_KEY,view.lkFolder);else localStorage.removeItem(LK_FOLDER_KEY);}catch(e){}
+  view.lkExpanded={};view.lkFolderMenu=null;view.lkMove=null;if(silent)return;render();const sc=document.querySelector('[data-scroll]');if(sc)sc.scrollTop=0;}
+function lkUniqueName(name,parent,exceptId){const sib=lockerFolders.filter(f=>(f.parent||null)===(parent||null)&&f.id!==exceptId).map(f=>f.name.toLowerCase());if(!sib.includes(name.toLowerCase()))return name;for(let i=2;i<999;i++){const n=name+' ('+i+')';if(!sib.includes(n.toLowerCase()))return n;}return name;}
+function lockerCreateFolder(name){name=(name||'').trim();if(!name)return;const now=Date.now();const f={id:'d'+uid(),name:lkUniqueName(name,view.lkFolder),parent:view.lkFolder||null,ts:now,mt:now};lockerFolders.push(f);lockerPushDebounced();toast('Folder "'+f.name+'" created');}
+function lockerRenameFolder(id,name){const f=lkFolder(id);name=(name||'').trim();if(!f||!name||name===f.name)return;f.name=lkUniqueName(name,f.parent,f.id);f.mt=Date.now();view.lkFolderMenu=null;lockerPushDebounced();}
+function lockerMoveFolder(id,to){const f=lkFolder(id);if(!f)return;to=to||null;if(to&&lkDescendants(id).has(to)){toast("A folder can't go inside itself");return;}if((f.parent||null)===to)return;
+  f.parent=to;f.name=lkUniqueName(f.name,to,f.id);f.mt=Date.now();view.lkMove=null;view.lkFolderMenu=null;render();lockerPushDebounced();toast('Moved to '+lkFolderLabel(to));}
+function lockerMoveItem(id,to){const it=lockerIndex.find(x=>x.id===id);if(!it)return;to=to||null;if((it.folder||null)===to)return;it.folder=to;it.mt=Date.now();view.lkMove=null;delete view.lkExpanded[id];render();lockerPushDebounced();toast('Moved to '+lkFolderLabel(to));}
+async function lockerDeleteFolder(id){const f=lkFolder(id);if(!f)return;const ids=lkDescendants(id);const files=lockerIndex.filter(it=>it.folder&&ids.has(it.folder));const subs=ids.size-1;
+  const what=[files.length?files.length+' file'+(files.length===1?'':'s'):'',subs?subs+' subfolder'+(subs===1?'':'s'):''].filter(Boolean).join(' and ');
+  if(!confirm('Delete folder "'+f.name+'"'+(what?' and its '+what:'')+'? This cannot be undone.'))return;
+  const now=Date.now();
+  files.forEach(it=>{for(let i=0;i<it.chunks;i++)lkDelObj(it.id+'/'+i);lkTomb[it.id]=now;try{const m=lkMedia[it.id];if(m&&m.url)URL.revokeObjectURL(m.url);}catch(e){}delete lkMedia[it.id];});
+  ids.forEach(fid=>{lkTomb[fid]=now;});
+  const gone=new Set(files.map(x=>x.id));lockerIndex=lockerIndex.filter(it=>!gone.has(it.id));lockerFolders=lockerFolders.filter(x=>!ids.has(x.id));
+  if(view.lkFolder&&ids.has(view.lkFolder))lkSetFolder(f.parent||null,true);view.lkFolderMenu=null;view.lkMove=null;
+  render();try{await lockerPush();}catch(e){}toast('Folder deleted');}
+
+/* ---- toast (lives outside #app so re-renders don't wipe it) ---- */
+let _toastT=null;
+function toast(msg){let el=document.getElementById('otk-toast');if(!el){el=document.createElement('div');el.id='otk-toast';document.body.appendChild(el);}
+  el.textContent=msg;el.style.cssText='position:fixed;left:50%;bottom:calc(22px + env(safe-area-inset-bottom));transform:translateX(-50%);z-index:95;max-width:calc(100vw - 32px);padding:10px 15px;border:1px solid var(--line-strong);border-radius:var(--r2);background:var(--surface2);color:var(--text2);font-family:var(--font);font-size:12px;line-height:1.4;box-shadow:0 14px 40px rgba(0,0,0,.45);opacity:1;transition:opacity .25s;pointer-events:none;';
+  clearTimeout(_toastT);_toastT=setTimeout(()=>{el.style.opacity='0';},2800);}
+
+/* ---- copy / share ---- */
+function lkBlobOf(it){const m=lkMedia[it.id];if(m&&m.ready&&m.url)return fetch(m.url).then(r=>r.blob());return lockerBlob(it);}
+/* the system clipboard only takes PNG images, so everything else is re-encoded */
+function lkToPng(blob){return new Promise((res,rej)=>{const url=URL.createObjectURL(blob);const im=new Image();
+  im.onload=()=>{try{const c=document.createElement('canvas');c.width=im.naturalWidth||1;c.height=im.naturalHeight||1;c.getContext('2d').drawImage(im,0,0);c.toBlob(b=>{URL.revokeObjectURL(url);b?res(b):rej(new Error('PNG encode failed'));},'image/png');}catch(e){URL.revokeObjectURL(url);rej(e);}};
+  im.onerror=()=>{URL.revokeObjectURL(url);rej(new Error('Image decode failed'));};im.src=url;});}
+function lkFlash(btn){if(!btn)return;const o=btn.innerHTML,oc=btn.style.color;btn.innerHTML='<span style="display:flex;">'+icon('check',15)+'</span>';btn.style.color='var(--accent2)';setTimeout(()=>{btn.innerHTML=o;btn.style.color=oc;},1100);}
+/* ClipboardItem gets a PROMISE so the click's user-activation survives the async decrypt */
+async function lkClipWrite(type,blobPromise){
+  if(!navigator.clipboard||!navigator.clipboard.write||!window.ClipboardItem)throw new Error('Copying this kind of file is not supported in this browser');
+  let item;try{item=new ClipboardItem({[type]:blobPromise});}catch(e){item=new ClipboardItem({[type]:await blobPromise});}
+  await navigator.clipboard.write([item]);}
+async function lockerCopy(id,btn){const it=lockerIndex.find(x=>x.id===id);if(!it)return;const k=mediaKind(it.type,it.name);
+  try{
+    if(k==='image')await lkClipWrite('image/png',lkBlobOf(it).then(b=>b.type==='image/png'?b:lkToPng(b)));
+    else if(k==='text'){const p=lkBlobOf(it).then(b=>b.text());try{await lkClipWrite('text/plain',p.then(t=>new Blob([t],{type:'text/plain'})));}catch(e){await navigator.clipboard.writeText(await p);}}
+    else throw new Error('This file type cannot go on the clipboard — use Share or Download');
+    lkFlash(btn);toast(k==='image'?'Image copied to clipboard':'Text copied to clipboard');
+  }catch(e){toast((e&&e.message)||'Copy failed');}}
+const lkCanShare=()=>typeof navigator.canShare==='function'&&typeof navigator.share==='function';
+async function lockerShare(id){const it=lockerIndex.find(x=>x.id===id);if(!it)return;
+  try{const b=await lkBlobOf(it);const f=new File([b],it.name,{type:it.type||b.type||'application/octet-stream'});
+    if(!navigator.canShare({files:[f]}))throw new Error('Sharing this file is not supported here');
+    await navigator.share({files:[f],title:it.name});}
+  catch(e){if(e&&e.name==='AbortError')return;toast(e&&e.name==='NotAllowedError'?'Tap Share once more':((e&&e.message)||'Share failed'));}}
+
+/* ---- Android share target: the service worker (sw.js) parks shared files in IndexedDB, we import them here ---- */
+const SHARE_DB='otk-share', SHARE_STORE='files';
+function shareDB(){return new Promise((res,rej)=>{const r=indexedDB.open(SHARE_DB,1);r.onupgradeneeded=()=>{if(!r.result.objectStoreNames.contains(SHARE_STORE))r.result.createObjectStore(SHARE_STORE,{autoIncrement:true});};r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error);});}
+async function shareTake(){const db=await shareDB();try{return await new Promise((res,rej)=>{const out=[];const rq=db.transaction(SHARE_STORE,'readonly').objectStore(SHARE_STORE).openCursor();rq.onsuccess=()=>{const c=rq.result;if(c){out.push({key:c.key,val:c.value});c.continue();}else res(out);};rq.onerror=()=>rej(rq.error);});}finally{db.close();}}
+async function shareDrop(keys){if(!keys.length)return;const db=await shareDB();try{await new Promise((res,rej)=>{const tx=db.transaction(SHARE_STORE,'readwrite');const st=tx.objectStore(SHARE_STORE);keys.forEach(k=>st.delete(k));tx.oncomplete=res;tx.onerror=()=>rej(tx.error);});}finally{db.close();}}
+let _shareBusy=false;
+async function importShared(){
+  if(_shareBusy||!('indexedDB' in window))return;_shareBusy=true;
+  try{
+    const pending=await shareTake();if(!pending.length)return;
+    view.section='locker';view.drawer=false;
+    if(!lockerReady()){render();toast(pending.length+' shared item'+(pending.length===1?'':'s')+' waiting — set up the Locker in Sync to import');return;}
+    const files=pending.map(p=>{const v=p.val||{};
+      if(v.file)return (v.file instanceof File&&v.file.name)?v.file:new File([v.file],v.name||('shared-'+stampName()),{type:v.type||v.file.type||''});
+      return new File([String(v.text||'')],'shared-'+stampName()+'.txt',{type:'text/plain'});});
+    render();if(!lockerLoaded)await lockerPull();render();
+    const where=lkFolderLabel(view.lkFolder);const ok=await lockerUpload(files);
+    await shareDrop(pending.filter((p,i)=>ok[i]).map(p=>p.key));
+    const n=ok.filter(Boolean).length,bad=ok.length-n;
+    toast(n+' file'+(n===1?'':'s')+' added to '+where+(bad?' — '+bad+' failed, share them again':''));
+  }catch(e){toast('Share import failed: '+((e&&e.message)||e));}
+  finally{_shareBusy=false;}
+}
 async function lockerDownload(id){const item=lockerIndex.find(x=>x.id===id);if(!item)return;try{const blob=await lockerBlob(item);const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=item.name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),15000);}catch(e){alert("Download failed: "+(e.message||e));}}
-async function lockerDelete(id){const item=lockerIndex.find(x=>x.id===id);if(!item)return;if(!confirm('Delete "'+item.name+'" from the locker?'))return;for(let i=0;i<item.chunks;i++)lkDelObj(item.id+"/"+i);lockerIndex=lockerIndex.filter(x=>x.id!==id);try{const m=lkMedia[id];if(m&&m.url)URL.revokeObjectURL(m.url);}catch(e){}delete lkMedia[id];delete view.lkExpanded[id];if(view.lkLightbox===id)view.lkLightbox=null;try{await lockerPush();}catch(e){}render();}
-function setSection(s){if(s!=='locker'){lockerRevokeMedia();view.lkExpanded={};}view.section=s;view.drawer=false;view.lkLightbox=null;view.lkFilterOpen=false;view.lkAttachOpen=null;render();if(s==='locker'){if(!lockerLoaded&&cloudOn()&&encOn())lockerPull().then(()=>{render();lockerPrefetch();});else lockerPrefetch();}}
+async function lockerDelete(id){const item=lockerIndex.find(x=>x.id===id);if(!item)return;if(!confirm('Delete "'+item.name+'" from the locker?'))return;for(let i=0;i<item.chunks;i++)lkDelObj(item.id+"/"+i);lkTomb[id]=Date.now();lockerIndex=lockerIndex.filter(x=>x.id!==id);try{const m=lkMedia[id];if(m&&m.url)URL.revokeObjectURL(m.url);}catch(e){}delete lkMedia[id];delete view.lkExpanded[id];if(view.lkLightbox===id)view.lkLightbox=null;try{await lockerPush();}catch(e){}render();}
+function setSection(s){if(s!=='locker'){lockerRevokeMedia();view.lkExpanded={};}view.section=s;view.drawer=false;view.lkLightbox=null;view.lkFilterOpen=false;view.lkAttachOpen=null;view.lkFolderMenu=null;view.lkMove=null;render();if(s==='locker'){if(!lockerLoaded&&cloudOn()&&encOn())lockerPull().then(()=>{render();lockerPrefetch();});else lockerPrefetch();}}
 function sectionToggleHTML(){const t=(s,l)=>'<button data-act="setSection" data-s="'+s+'" style="padding:5px 11px;border:none;border-radius:var(--r3);cursor:pointer;font-family:inherit;font-size:10px;letter-spacing:.1em;text-transform:uppercase;background:'+(view.section===s?'var(--accent-soft)':'transparent')+';color:'+(view.section===s?'var(--accent)':'var(--dim2)')+';">'+l+'</button>';return '<div style="display:flex;gap:2px;flex:none;border:1px solid var(--line);border-radius:var(--r3);padding:2px;">'+t('tasks','Tasks')+t('locker','Locker')+'</div>';}
 function lkNotice(title,body){return '<main style="flex:1;display:flex;align-items:center;justify-content:center;text-align:center;padding:40px;"><div style="max-width:320px;color:var(--faint);font-size:12.5px;line-height:1.8;"><div style="color:var(--dim);text-transform:uppercase;letter-spacing:2px;font-size:11px;margin-bottom:10px;">'+title+'</div>'+body+'</div></main>';}
 function lockerMainHTML(mobile){
@@ -344,17 +473,42 @@ function lockerMainHTML(mobile){
   const up=Object.keys(lkUploads).map(id=>{const u=lkUploads[id];return '<div style="display:flex;align-items:center;gap:9px;padding:8px 11px;border:1px solid var(--line);border-radius:var(--r2);background:var(--surface2);margin-bottom:6px;"><span style="display:flex;flex:none;color:var(--accent);">'+icon('upload',14)+'</span><span style="flex:1;min-width:0;font-size:12px;color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(u.name)+'</span>'+(u.err?'<span style="font-size:10px;color:#e0705a;">'+esc(u.err)+'</span>':'<div style="width:90px;height:4px;border-radius:2px;background:var(--line);overflow:hidden;flex:none;"><div class="otk-lkprog" data-id="'+id+'" style="height:100%;width:'+Math.round(u.done/u.total*100)+'%;background:var(--accent);transition:width .2s;"></div></div>')+'</div>';}).join('');
   const errHtml=lkErr?'<div style="padding:9px 11px;border:1px solid #5a3230;border-radius:var(--r2);background:rgba(224,90,70,.1);color:#e0705a;font-size:11px;margin-bottom:10px;">'+esc(lkErr)+'</div>':'';
   const pill='display:flex;align-items:center;gap:7px;padding:7px 11px;border:1px solid var(--line);border-radius:var(--r2);background:var(--bg2);color:var(--text2);font-family:inherit;font-size:10.5px;letter-spacing:.04em;text-transform:uppercase;cursor:pointer;';
-  const titleBar='<div style="display:flex;align-items:center;gap:11px;padding:16px '+pad+' 10px;flex:none;flex-wrap:wrap;">'
-    +'<span style="display:flex;color:var(--text2);flex:none;">'+icon('archive',Math.round(18*Math.min(g,1.3)))+'</span>'
-    +'<h1 style="margin:0;font-size:15px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--text);flex:none;">Locker</h1>'
-    +'<span style="font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--faint);flex:none;white-space:nowrap;">· '+lockerIndex.length+' file'+(lockerIndex.length===1?'':'s')+' · '+fmtSize(totalBytes)+'</span>'
-    +'<span style="flex:1;min-width:12px;"></span>'
-    +'<div style="display:flex;align-items:center;gap:8px;flex:none;padding:7px 11px;border:1px solid var(--line);border-radius:var(--r2);background:var(--bg2);width:200px;max-width:44vw;"><span style="display:flex;color:var(--faint);flex:none;">'+icon('search',14)+'</span><input id="otk-lksearch" value="'+esc(view.lkSearch)+'" placeholder="Search…" style="flex:1;min-width:0;background:transparent;border:none;outline:none;font-family:inherit;font-size:12px;color:var(--text2);" /></div>'
+  const global=!!((view.lkSearch||'').trim()||f!=='ALL');
+  // the mobile header already says "Locker" with the padlock, so the title is only repeated on desktop
+  const titleBar='<div style="display:flex;align-items:center;gap:11px;padding:'+(mobile?'4px':'16px')+' '+pad+' 10px;flex:none;flex-wrap:wrap;">'
+    +(mobile?'':'<span style="display:flex;color:var(--text2);flex:none;">'+icon('lock',Math.round(18*Math.min(g,1.3)))+'</span>'
+    +'<h1 style="margin:0;font-size:15px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--text);flex:none;">Locker</h1>')
+    +'<span style="font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--faint);flex:none;white-space:nowrap;">'+(mobile?'':'· ')+lockerIndex.length+' file'+(lockerIndex.length===1?'':'s')+' · '+fmtSize(totalBytes)+'</span>'
+    +(mobile?'':'<span style="flex:1;min-width:12px;"></span>')
+    +'<div style="display:flex;align-items:center;gap:8px;'+(mobile?'flex:1;min-width:90px;':'flex:none;width:200px;max-width:44vw;')+'padding:7px 11px;border:1px solid var(--line);border-radius:var(--r2);background:var(--bg2);"><span style="display:flex;color:var(--faint);flex:none;">'+icon('search',14)+'</span><input id="otk-lksearch" value="'+esc(view.lkSearch)+'" placeholder="Search…" style="flex:1;min-width:0;background:transparent;border:none;outline:none;font-family:inherit;font-size:12px;color:var(--text2);" /></div>'
     +'<div style="position:relative;flex:none;"><button data-act="lkFilterToggle" style="'+pill+'"><span style="display:flex;">'+icon('sliders',14)+'</span><span style="letter-spacing:.08em;">'+esc(activeLabel)+'</span><span style="display:flex;">'+icon('chevron',13)+'</span></button>'+(view.lkFilterOpen?('<div data-act="lkFilterClose" style="position:fixed;inset:0;z-index:40;"></div>'+lockerFilterMenuHTML()):'')+'</div>'
     +'</div>';
-  const importRow='<div style="padding:0 '+pad+';flex:none;"><div id="otk-dz" data-act="lkPick" style="display:flex;align-items:center;gap:12px;margin-bottom:14px;padding:11px 12px;border:1px solid var(--line);border-radius:var(--r1);background:var(--bg2);cursor:pointer;"><span style="display:flex;align-items:center;justify-content:center;width:36px;height:36px;flex:none;border:1px solid var(--line-strong);border-radius:var(--r2);background:var(--bg);color:var(--text2);">'+icon('upload',15)+'</span><span style="flex:1;min-width:0;font-size:13px;color:var(--dim2);">'+(mobile?'Tap to import files…':'Drop files here, or click to import…')+'</span><span style="align-self:stretch;flex:none;display:flex;align-items:center;padding:0 16px;border-radius:var(--r2);background:var(--accent);color:var(--on-accent);font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;">Import</span></div><input id="otk-file" type="file" multiple style="display:none;" /></div>';
-  return '<main style="flex:1;min-width:0;display:flex;flex-direction:column;overflow:hidden;">'+titleBar+importRow
-    +'<div style="flex:1;overflow-y:auto;padding:0 '+pad+' 24px;">'+errHtml+up+'<div id="otk-lklist">'+lockerListHTML()+'</div></div></main>';
+  const here=lkFolderLabel(view.lkFolder);
+  const ib='display:flex;align-items:center;gap:6px;flex:none;align-self:stretch;padding:0 '+(mobile?'11px':'14px')+';border-radius:var(--r2);font-family:inherit;font-size:11px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;cursor:pointer;';
+  // "Photos" opens the system photo picker (gallery); "Files" opens the generic file chooser
+  const importRow='<div style="padding:0 '+pad+';flex:none;"><div id="otk-dz" data-act="lkPick" style="display:flex;align-items:center;gap:10px;margin-bottom:12px;padding:9px 9px 9px '+(mobile?'13px':'10px')+';border:1px solid var(--line);border-radius:var(--r1);background:var(--bg2);cursor:pointer;">'
+    +(mobile?'':'<span style="display:flex;align-items:center;justify-content:center;width:36px;height:36px;flex:none;border:1px solid var(--line-strong);border-radius:var(--r2);background:var(--bg);color:var(--text2);">'+icon('upload',15)+'</span>')
+    +'<span style="flex:1;min-width:0;font-size:12.5px;line-height:1.35;color:var(--dim2);">'+(mobile?'Add to ':'Drop files here, or import into ')+'<b style="color:var(--text2);font-weight:600;word-break:break-word;">'+esc(here)+'</b></span>'
+    +'<button data-act="lkPickPhoto" title="Pick photos and videos from the gallery" style="'+ib+'border:1px solid var(--accent-line);background:var(--accent-soft);color:var(--text);"><span style="display:flex;">'+icon('image',15)+'</span>Photos</button>'
+    +'<button data-act="lkPick" title="Pick any files" style="'+ib+'border:none;background:var(--accent);color:var(--on-accent);"><span style="display:flex;">'+icon('upload',14)+'</span>Files</button>'
+    +'</div><input id="otk-file" type="file" multiple style="display:none;" /><input id="otk-photo" type="file" accept="image/*,video/*" multiple style="display:none;" /></div>';
+  return '<main style="flex:1;min-width:0;display:flex;flex-direction:column;overflow:hidden;">'+titleBar+lkCrumbsHTML(pad,global)+importRow
+    +'<div data-scroll style="flex:1;overflow-y:auto;padding:0 '+pad+' 24px;">'+errHtml+up+'<div id="otk-lklist">'+lockerListHTML()+'</div></div></main>';
+}
+/* breadcrumb: Locker › A › B, with Up and New folder */
+function lkCrumbsHTML(pad,global){
+  const seg='font-size:10.5px;letter-spacing:.07em;text-transform:uppercase;';
+  let left;
+  if(global)left='<span style="display:flex;color:var(--faint);flex:none;">'+icon('search',13)+'</span><span style="'+seg+'color:var(--dim2);">Results in all folders</span>';
+  else{const parts=[{id:'',name:'Locker'}].concat(lkFolderPath(view.lkFolder).map(f=>({id:f.id,name:f.name})));
+    left=parts.map((p,i)=>{const last=i===parts.length-1;
+      return (i?'<span style="display:flex;flex:none;color:var(--faint);">'+icon('chevright',12)+'</span>':'')
+        +(last?'<span style="'+seg+'padding:3px 2px;color:var(--text);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:240px;">'+esc(p.name)+'</span>'
+              :'<button data-act="lkCrumb" data-id="'+p.id+'" style="'+seg+'padding:3px 4px;border:none;border-radius:var(--r3);background:transparent;color:var(--dim);font-family:inherit;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:160px;">'+esc(p.name)+'</button>');}).join('');}
+  const sq='display:flex;align-items:center;justify-content:center;flex:none;height:30px;border:1px solid var(--line);border-radius:var(--r2);background:var(--bg2);color:var(--text2);font-family:inherit;cursor:pointer;';
+  const upB=(!global&&view.lkFolder)?'<button data-act="lkCrumb" data-id="'+((lkFolder(view.lkFolder)||{}).parent||'')+'" title="Up one level" style="'+sq+'width:30px;">'+icon('arrowup',14)+'</button>':'';
+  const newB=global?'':'<button data-act="lkNewFolder" title="New folder here" style="'+sq+'gap:6px;padding:0 10px;font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;"><span style="display:flex;">'+icon('folderplus',15)+'</span>Folder</button>';
+  return '<div style="display:flex;align-items:center;gap:8px;padding:0 '+pad+' 10px;flex:none;">'+upB+'<div style="display:flex;align-items:center;gap:2px;flex:1;min-width:0;flex-wrap:wrap;">'+left+'</div>'+newB+'</div>';
 }
 function lockerFilterMenuHTML(){
   const tById=tagMap();const present={};lockerIndex.forEach(it=>{const k=mediaKind(it.type,it.name);present[k]=(present[k]||0)+1;});
@@ -369,33 +523,103 @@ function lockerFilterMenuHTML(){
   [['recent','Recent'],['name','Name'],['size','Size'],['type','Type']].forEach(kv=>{const on=view.lkSort===kv[0];h+='<button data-act="lkSetSort" data-s="'+kv[0]+'" style="'+mib+'background:'+(on?'var(--accent-soft)':'transparent')+';color:'+(on?'var(--text)':'var(--dim)')+';"><span style="flex:1;">'+kv[1]+'</span></button>';});
   return h+'</div>';
 }
+/* Folder view: sub-folders then files of the current folder.
+   Search or a filter switches to a flat view across ALL folders, each result showing its path. */
 function lockerListHTML(){
-  const tById=tagMap();let list=lockerIndex.slice();const f=view.lkFilter||'ALL';
-  if(f.indexOf('type:')===0){const tk=f.slice(5);list=list.filter(it=>mediaKind(it.type,it.name)===tk);}
-  else if(f.indexOf('tag:')===0){const tg=f.slice(4);list=list.filter(it=>(it.tags||[]).includes(tg));}
-  const q=(view.lkSearch||'').trim().toLowerCase();
-  if(q)list=list.filter(it=>(it.name+' '+(it.tags||[]).map(t=>(tById[t]||{}).label||'').join(' ')).toLowerCase().includes(q));
+  const mobile=isMobile(),tById=tagMap(),f=view.lkFilter||'ALL',q=(view.lkSearch||'').trim().toLowerCase(),global=!!(q||f!=='ALL');
+  let folders,files;
+  if(global){
+    files=lockerIndex.slice();
+    if(f.indexOf('type:')===0){const tk=f.slice(5);files=files.filter(it=>mediaKind(it.type,it.name)===tk);}
+    else if(f.indexOf('tag:')===0){const tg=f.slice(4);files=files.filter(it=>(it.tags||[]).includes(tg));}
+    if(q)files=files.filter(it=>(it.name+' '+(it.tags||[]).map(t=>(tById[t]||{}).label||'').join(' ')+' '+lkFolderLabel(it.folder)).toLowerCase().includes(q));
+    folders=(q&&f==='ALL')?lockerFolders.filter(x=>x.name.toLowerCase().includes(q)).sort(lkByName):[];
+  }else{folders=lkSubfolders(view.lkFolder);files=lockerIndex.filter(it=>(it.folder||null)===(view.lkFolder||null));}
   const sort=view.lkSort||'recent';
-  if(sort==='name')list.sort((a,b)=>a.name.localeCompare(b.name));
-  else if(sort==='size')list.sort((a,b)=>(b.size||0)-(a.size||0));
-  else if(sort==='type')list.sort((a,b)=>mediaKind(a.type,a.name).localeCompare(mediaKind(b.type,b.name))||a.name.localeCompare(b.name));
-  else list.sort((a,b)=>(b.ts||0)-(a.ts||0));
-  if(!list.length)return '<div style="padding:52px 20px;text-align:center;color:var(--faint);font-size:12px;line-height:1.7;border:1px solid var(--line);border-radius:var(--r1);background:var(--bg2);">'+(lockerIndex.length?'No files match.<br/>Try a different filter or search.':'Locker is empty.<br/>Import a file — it uploads encrypted and appears on your other devices.')+'</div>';
-  return '<div style="border:1px solid var(--line);border-radius:var(--r1);overflow:hidden;background:var(--bg2);">'+list.map((it,i)=>lockerItemHTML(it,i,list.length)).join('')+'</div>';
+  if(sort==='name')files.sort(lkByName);
+  else if(sort==='size')files.sort((a,b)=>(b.size||0)-(a.size||0));
+  else if(sort==='type')files.sort((a,b)=>mediaKind(a.type,a.name).localeCompare(mediaKind(b.type,b.name))||lkByName(a,b));
+  else files.sort((a,b)=>(b.ts||0)-(a.ts||0));
+  if(!folders.length&&!files.length){
+    const msg=global?'No files match.<br/>Try a different filter or search.'
+      :view.lkFolder?'This folder is empty.<br/>Import files here, or create a sub-folder.'
+      :(lockerIndex.length||lockerFolders.length)?'Nothing at the top level yet.<br/>Your files are inside folders.'
+      :'Locker is empty.<br/>Import photos or files — they upload encrypted and appear on your other devices.';
+    return '<div style="padding:52px 20px;text-align:center;color:var(--faint);font-size:12px;line-height:1.7;border:1px solid var(--line);border-radius:var(--r1);background:var(--bg2);">'+msg+'</div>';}
+  const stats=lkFolderStats(),total=folders.length+files.length;
+  const rows=folders.map((x,i)=>lockerFolderHTML(x,stats[x.id],global,i===total-1)).concat(files.map((it,i)=>lockerItemHTML(it,global,folders.length+i===total-1)));
+  return mobile?rows.join(''):'<div style="border:1px solid var(--line);border-radius:var(--r1);overflow:hidden;background:var(--bg2);">'+rows.join('')+'</div>';
 }
-function lockerItemHTML(it,idx,total){
-  const g=G(),k=mediaKind(it.type,it.name),meta=KINDMETA[k]||KINDMETA.file,exp=!!view.lkExpanded[it.id],m=lkMedia[it.id],tById=tagMap();
-  const miniTags=(it.tags||[]).map(tid=>tById[tid]).filter(Boolean).slice(0,3).map(tg=>'<span style="display:flex;color:var(--dim2);">'+icon(tg.icon,13)+'</span>').join('');
+/* media tile — same anatomy as a task tile: icon · name + meta line · date (or time if < 24 h) · copy · chevron */
+function lockerItemHTML(it,global,last){
+  const mobile=isMobile(),g=G(),k=mediaKind(it.type,it.name),meta=KINDMETA[k]||KINDMETA.file,exp=!!view.lkExpanded[it.id],m=lkMedia[it.id],tById=tagMap();
+  const rowI=Math.round(18*g),mini=Math.round(13*g);
+  const miniTags=(it.tags||[]).map(tid=>tById[tid]).filter(Boolean).slice(0,3).map(tg=>'<span style="display:flex;">'+icon(tg.icon,mini)+'</span>').join('');
   const dur=(m&&m.duration)||it.dur,dim=(m&&m.w&&m.h)?(m.w+'×'+m.h):'';
-  let mr=[];if(k==='audio'){if(dur)mr.push(fmtDur(dur));mr.push(fmtSize(it.size));}else if(k==='video'){if(dur)mr.push(fmtDur(dur));mr.push(dim||fmtSize(it.size));}else if(k==='image'){if(dim)mr.push(dim);mr.push(fmtSize(it.size));}else mr.push(fmtSize(it.size));
-  const row='<div data-act="lkExpand" data-id="'+it.id+'" style="display:flex;align-items:center;gap:12px;padding:12px 15px;cursor:pointer;">'
-    +'<span style="display:flex;flex:none;color:var(--text2);">'+icon(meta.icon,Math.round(19*Math.min(g,1.3)))+'</span>'
-    +'<span style="flex:1;min-width:0;font-size:13px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(it.name)+'</span>'
-    +(miniTags?'<span style="display:flex;gap:6px;flex:none;">'+miniTags+'</span>':'')
-    +'<span style="font-size:10px;letter-spacing:.05em;color:var(--faint);flex:none;white-space:nowrap;">'+esc(mr.join(' · '))+'</span>'
-    +'<span style="display:flex;flex:none;color:var(--faint);transition:transform .18s;transform:rotate('+(exp?'180deg':'0deg')+');">'+icon('chevron',14)+'</span></div>';
-  const bottom=idx===total-1?'transparent':'var(--line-soft)';
-  return '<div style="border-bottom:1px solid '+bottom+';'+(exp?'background:var(--surface);':'')+'">'+row+(exp?lockerExpandHTML(it,k,m):'')+'</div>';
+  const mr=[];if((k==='audio'||k==='video')&&dur)mr.push(fmtDur(dur));if((k==='image'||k==='video')&&dim)mr.push(dim);mr.push(fmtSize(it.size));if(global&&it.folder)mr.push(lkFolderLabel(it.folder));
+  const when=fmtWhen(it.ts);
+  const copyB=(k==='image'||k==='text')?'<button data-act="lkCopy" data-id="'+it.id+'" title="Copy to clipboard" style="display:flex;flex:none;align-items:center;justify-content:center;padding:4px;border:none;background:transparent;color:var(--dim2);cursor:pointer;">'+icon('copy',15)+'</button>':'';
+  const chev='<span style="display:flex;flex:none;color:var(--faint);transition:transform .18s;transform:rotate('+(exp?'180deg':'0deg')+');">'+icon('chevron',mobile?16:15)+'</span>';
+  const ic='<span style="display:flex;flex:none;color:var(--accent);">'+icon(meta.icon,rowI)+'</span>';
+  if(mobile){
+    const head='<div data-act="lkExpand" data-id="'+it.id+'" style="display:flex;align-items:center;gap:13px;padding:14px 16px;cursor:pointer;">'+ic
+      +'<div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:4px;"><span style="font-size:13px;line-height:1.35;color:var(--text);white-space:normal;word-break:break-word;overflow-wrap:anywhere;">'+esc(it.name)+'</span>'
+      +'<div style="display:flex;align-items:center;gap:8px;min-width:0;">'+(miniTags?'<span style="display:flex;gap:6px;flex:none;color:var(--dim2);">'+miniTags+'</span>':'')
+      +'<span style="font-size:10px;letter-spacing:.03em;color:var(--faint);min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(mr.join(' · '))+'</span><span style="flex:1"></span>'
+      +'<span style="font-size:9.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--faint);flex:none;white-space:nowrap;">'+esc(when)+'</span></div></div>'+copyB+chev+'</div>';
+    return '<div style="margin:0 0 9px;border-radius:var(--r1);border:1px solid var(--line);overflow:hidden;background:var(--surface2);">'+head+(exp?lockerExpandHTML(it,k,m):'')+'</div>';
+  }
+  const head='<div data-act="lkExpand" data-id="'+it.id+'" style="display:flex;align-items:center;gap:11px;padding:8px 12px;cursor:pointer;">'+ic
+    +'<span style="flex:1;min-width:0;font-size:13px;line-height:1.3;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(it.name)+'</span>'
+    +(miniTags?'<span style="display:flex;gap:5px;flex:none;color:var(--faint);">'+miniTags+'</span>':'')
+    +'<span style="font-size:10px;letter-spacing:.03em;color:var(--faint);flex:none;white-space:nowrap;max-width:40%;overflow:hidden;text-overflow:ellipsis;">'+esc(mr.join(' · '))+'</span>'
+    +'<span style="font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint);min-width:52px;text-align:right;flex:none;white-space:nowrap;">'+esc(when)+'</span>'+copyB+chev+'</div>';
+  return '<div style="border-bottom:1px solid '+(last?'transparent':'var(--line-soft)')+';'+(exp?'background:var(--surface);':'')+'">'+head+(exp?lockerExpandHTML(it,k,m):'')+'</div>';
+}
+/* folder tile: click opens it; the ⋯ button reveals Rename / Move / Delete */
+function lockerFolderHTML(fo,st,global,last){
+  const mobile=isMobile(),g=G(),rowI=Math.round(18*g);st=st||{n:0,bytes:0,last:0};
+  const menu=view.lkFolderMenu===fo.id,moving=!!(view.lkMove&&view.lkMove.kind==='folder'&&view.lkMove.id===fo.id);
+  const nSub=lockerFolders.filter(x=>x.parent===fo.id).length;
+  const meta=[st.n+' file'+(st.n===1?'':'s')];if(nSub)meta.push(nSub+' folder'+(nSub===1?'':'s'));if(st.bytes)meta.push(fmtSize(st.bytes));if(global&&fo.parent)meta.push(lkFolderLabel(fo.parent));
+  const when=fmtWhen(Math.max(fo.mt||0,fo.ts||0,st.last||0));
+  const ic='<span style="display:flex;flex:none;color:var(--accent);">'+icon('folder',rowI)+'</span>';
+  const dots='<button data-act="lkFolderMenu" data-id="'+fo.id+'" title="Folder actions" style="display:flex;flex:none;align-items:center;justify-content:center;padding:4px;border:none;border-radius:var(--r3);background:'+(menu?'var(--accent-soft)':'transparent')+';color:'+(menu?'var(--text)':'var(--dim2)')+';cursor:pointer;">'+icon('dots',16)+'</button>';
+  const go='<span style="display:flex;flex:none;color:var(--faint);">'+icon('chevright',mobile?16:15)+'</span>';
+  const actions=menu?lkFolderActionsHTML(fo,moving,mobile):'';
+  if(mobile){
+    const head='<div data-act="lkOpenFolder" data-id="'+fo.id+'" style="display:flex;align-items:center;gap:13px;padding:14px 16px;cursor:pointer;">'+ic
+      +'<div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:4px;"><span style="font-size:13px;line-height:1.35;font-weight:600;color:var(--text);white-space:normal;word-break:break-word;overflow-wrap:anywhere;">'+esc(fo.name)+'</span>'
+      +'<div style="display:flex;align-items:center;gap:8px;min-width:0;"><span style="font-size:10px;letter-spacing:.03em;color:var(--faint);min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(meta.join(' · '))+'</span><span style="flex:1"></span>'
+      +'<span style="font-size:9.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--faint);flex:none;white-space:nowrap;">'+esc(when)+'</span></div></div>'+dots+go+'</div>';
+    return '<div style="margin:0 0 9px;border-radius:var(--r1);border:1px solid var(--line);overflow:hidden;background:var(--surface2);">'+head+actions+'</div>';
+  }
+  const head='<div data-act="lkOpenFolder" data-id="'+fo.id+'" style="display:flex;align-items:center;gap:11px;padding:8px 12px;cursor:pointer;">'+ic
+    +'<span style="flex:1;min-width:0;font-size:13px;line-height:1.3;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(fo.name)+'</span>'
+    +'<span style="font-size:10px;letter-spacing:.03em;color:var(--faint);flex:none;white-space:nowrap;max-width:40%;overflow:hidden;text-overflow:ellipsis;">'+esc(meta.join(' · '))+'</span>'
+    +'<span style="font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint);min-width:52px;text-align:right;flex:none;white-space:nowrap;">'+esc(when)+'</span>'+dots+go+'</div>';
+  return '<div style="border-bottom:1px solid '+(last?'transparent':'var(--line-soft)')+';'+(menu?'background:var(--surface);':'')+'">'+head+actions+'</div>';
+}
+function lkFolderActionsHTML(fo,moving,mobile){
+  const b='display:flex;align-items:center;gap:6px;padding:7px 12px;border-radius:var(--r2);font-family:inherit;font-size:11px;letter-spacing:.05em;text-transform:uppercase;cursor:pointer;';
+  return '<div style="border-top:1px solid var(--line);background:var(--surface2);padding:'+(mobile?'12px 16px':'10px 12px')+';display:flex;flex-direction:column;gap:10px;">'
+    +'<div style="display:flex;gap:8px;flex-wrap:wrap;">'
+    +'<button data-act="lkRenameFolder" data-id="'+fo.id+'" style="'+b+'border:1px solid var(--line-strong);background:transparent;color:var(--dim);"><span style="display:flex;">'+icon('pencil',13)+'</span>Rename</button>'
+    +'<button data-act="lkMoveOpen" data-kind="folder" data-id="'+fo.id+'" style="'+b+'border:1px solid '+(moving?'var(--accent-line)':'var(--line-strong)')+';background:'+(moving?'var(--accent-soft)':'transparent')+';color:'+(moving?'var(--text)':'var(--dim)')+';"><span style="display:flex;">'+icon('foldermove',13)+'</span>Move</button>'
+    +'<span style="flex:1"></span>'
+    +'<button data-act="lkDeleteFolder" data-id="'+fo.id+'" style="'+b+'border:1px solid #4a2c29;background:transparent;color:#e0806a;"><span style="display:flex;">'+icon('trash',13)+'</span>Delete</button>'
+    +'</div>'+(moving?lkMovePickerHTML('folder',fo.id):'')+'</div>';
+}
+/* destination list for Move — a folder can never be moved into itself or one of its descendants */
+function lkMovePickerHTML(kind,id){
+  const cur=kind==='folder'?((lkFolder(id)||{}).parent||null):((lockerIndex.find(x=>x.id===id)||{}).folder||null);
+  const banned=kind==='folder'?lkDescendants(id):new Set();
+  const opts=[{id:null,name:'Locker',depth:0,root:true}].concat(lkFolderTree().map(t=>({id:t.f.id,name:t.f.name,depth:t.depth+1})));
+  const rows=opts.filter(o=>!(o.id&&banned.has(o.id))).map(o=>{const here=(o.id||null)===cur;
+    return '<button '+(here?'disabled ':'')+'data-act="lkMoveTo" data-kind="'+kind+'" data-id="'+id+'" data-to="'+(o.id||'')+'" style="display:flex;align-items:center;gap:7px;width:100%;padding:6px 9px 6px '+(9+o.depth*14)+'px;border:none;border-radius:var(--r3);background:'+(here?'var(--accent-soft)':'transparent')+';color:'+(here?'var(--text)':'var(--dim)')+';font-family:inherit;font-size:11.5px;text-align:left;cursor:'+(here?'default':'pointer')+';">'
+      +'<span style="display:flex;flex:none;color:'+(here?'var(--accent)':'var(--dim2)')+';">'+icon(o.root?'lock':'folder',13)+'</span><span style="flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(o.name)+'</span>'
+      +(here?'<span style="font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--faint);flex:none;">current</span>':'')+'</button>';}).join('');
+  return '<div style="display:flex;flex-direction:column;gap:1px;max-height:240px;overflow-y:auto;padding:4px;border:1px solid var(--line);border-radius:var(--r2);background:var(--bg);"><div style="font-size:8.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--faint);padding:4px 9px 5px;">Move to</div>'+rows+'</div>';
 }
 function lockerExpandHTML(it,k,m){
   let preview='';
@@ -413,7 +637,7 @@ function lockerExpandHTML(it,k,m){
   else preview='<div style="display:flex;align-items:center;gap:12px;border:1px solid var(--line);border-radius:var(--r2);padding:16px;background:var(--bg);"><span style="display:flex;color:var(--text2);">'+icon('archive',26)+'</span><div style="font-size:12px;color:var(--dim);">No inline preview — use Download.</div></div>';
   const wide=(k==='image'||k==='video');
   const prevCol='<div style="'+(wide?'flex:1 1 320px;min-width:240px;max-width:480px;':'flex:1 1 100%;width:100%;')+'">'+preview+'</div>';
-  const mp=[['Size',fmtSize(it.size)],['Type',(m&&m.kind?KINDMETA[m.kind].label:KINDMETA[k].label)+(it.type?' · '+esc(it.type):'')],['Added',esc(fmtDate(it.ts))]];
+  const mp=[['Size',fmtSize(it.size)],['Type',(m&&m.kind?KINDMETA[m.kind].label:KINDMETA[k].label)+(it.type?' · '+esc(it.type):'')],['Added',esc(fmtStamp(it.ts))]];
   if(m&&m.w&&m.h)mp.push(['Dimensions',m.w+'×'+m.h]);if(m&&m.duration)mp.push(['Duration',fmtDur(m.duration)]);
   const metaGrid='<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:10px;">'+mp.map(p=>'<div style="display:flex;flex-direction:column;gap:2px;"><span style="font-size:8.5px;letter-spacing:.13em;text-transform:uppercase;color:var(--faint);">'+p[0]+'</span><span style="font-size:11.5px;color:var(--text2);word-break:break-word;">'+p[1]+'</span></div>').join('')+'</div>';
   const task=it.task?store.tasks.find(t=>t.id===it.task):null;let taskRow;
@@ -424,8 +648,17 @@ function lockerExpandHTML(it,k,m){
   const taskBlock='<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;"><span style="font-size:8.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--faint);flex:none;">Task</span>'+taskRow+'</div>';
   const chips=store.tags.map(tg=>{const active=(it.tags||[]).includes(tg.id);return '<button data-act="lkToggleTag" data-id="'+it.id+'" data-tid="'+tg.id+'" style="display:flex;align-items:center;gap:5px;padding:4px 8px;border-radius:var(--r3);font-family:inherit;font-size:10px;letter-spacing:.04em;text-transform:uppercase;cursor:pointer;'+(active?'background:var(--accent-soft);border:1px solid var(--accent-line);color:var(--text);':'background:var(--bg2);border:1px solid var(--line);color:var(--dim2);')+'"><span style="display:flex;">'+icon(tg.icon,12)+'</span>'+esc(tg.label)+'</button>';}).join('');
   const tagsBlock='<div style="display:flex;align-items:flex-start;gap:10px;flex-wrap:wrap;"><span style="font-size:8.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--faint);flex:none;padding-top:6px;">Tags</span><div style="display:flex;flex-wrap:wrap;gap:5px;flex:1;">'+(chips||'<span style="font-size:10.5px;color:var(--faint);padding-top:5px;">Create tags in the Tasks view first.</span>')+'</div></div>';
-  const actions='<div style="display:flex;align-items:center;gap:8px;padding-top:2px;"><button data-act="lkDownload" data-id="'+it.id+'" style="display:flex;align-items:center;gap:6px;padding:7px 13px;border:1px solid var(--line-strong);border-radius:var(--r2);background:transparent;color:var(--dim);font-size:11px;letter-spacing:.05em;text-transform:uppercase;cursor:pointer;"><span style="display:flex;">'+icon('download',13)+'</span> Download</button><span style="flex:1;"></span><button data-act="lkDelete" data-id="'+it.id+'" style="display:flex;align-items:center;gap:6px;padding:7px 13px;border:1px solid #4a2c29;border-radius:var(--r2);background:transparent;color:#e0806a;font-size:11px;letter-spacing:.05em;text-transform:uppercase;cursor:pointer;"><span style="display:flex;">'+icon('trash',13)+'</span> Delete</button></div>';
-  const dataCol='<div style="flex:1 1 300px;min-width:min(260px,100%);display:flex;flex-direction:column;gap:13px;">'+metaGrid+taskBlock+tagsBlock+actions+'</div>';
+  const ab='display:flex;align-items:center;gap:6px;padding:7px 13px;border:1px solid var(--line-strong);border-radius:var(--r2);background:transparent;color:var(--dim);font-size:11px;letter-spacing:.05em;text-transform:uppercase;cursor:pointer;';
+  const actions='<div style="display:flex;align-items:center;gap:8px;padding-top:2px;flex-wrap:wrap;">'
+    +'<button data-act="lkDownload" data-id="'+it.id+'" style="'+ab+'"><span style="display:flex;">'+icon('download',13)+'</span> Download</button>'
+    +(lkCanShare()?'<button data-act="lkShare" data-id="'+it.id+'" style="'+ab+'"><span style="display:flex;">'+icon('share',13)+'</span> Share</button>':'')
+    +'<span style="flex:1;"></span><button data-act="lkDelete" data-id="'+it.id+'" style="display:flex;align-items:center;gap:6px;padding:7px 13px;border:1px solid #4a2c29;border-radius:var(--r2);background:transparent;color:#e0806a;font-size:11px;letter-spacing:.05em;text-transform:uppercase;cursor:pointer;"><span style="display:flex;">'+icon('trash',13)+'</span> Delete</button></div>';
+  const fid=it.folder||null,moving=!!(view.lkMove&&view.lkMove.kind==='item'&&view.lkMove.id===it.id);
+  const folderBlock='<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;"><span style="font-size:8.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--faint);flex:none;">Folder</span>'
+    +'<span style="display:flex;align-items:center;gap:6px;min-width:0;max-width:100%;font-size:11px;color:var(--text2);border:1px solid var(--line);background:var(--bg);border-radius:var(--r2);padding:5px 9px;"><span style="display:flex;flex:none;color:var(--accent);">'+icon(fid?'folder':'lock',12)+'</span><span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(lkFolderLabel(fid))+'</span></span>'
+    +'<button data-act="lkMoveOpen" data-kind="item" data-id="'+it.id+'" style="display:flex;align-items:center;gap:6px;padding:5px 10px;border:1px '+(moving?'solid var(--accent-line)':'dashed var(--line-strong)')+';border-radius:var(--r2);background:'+(moving?'var(--accent-soft)':'transparent')+';color:'+(moving?'var(--text)':'var(--dim)')+';font-size:10.5px;letter-spacing:.03em;text-transform:uppercase;cursor:pointer;"><span style="display:flex;">'+icon('foldermove',13)+'</span> Move</button>'
+    +(moving?'<div style="width:100%;">'+lkMovePickerHTML('item',it.id)+'</div>':'')+'</div>';
+  const dataCol='<div style="flex:1 1 300px;min-width:min(260px,100%);display:flex;flex-direction:column;gap:13px;">'+metaGrid+folderBlock+taskBlock+tagsBlock+actions+'</div>';
   return '<div style="border-top:1px solid var(--line);background:var(--surface2);padding:15px;"><div style="display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start;">'+prevCol+dataCol+'</div></div>';
 }
 function wireLkAudio(scope){scope.querySelectorAll('audio[data-lk]').forEach(a=>{if(a._wired)return;a._wired=true;const id=a.dataset.lk;
@@ -544,9 +777,12 @@ function pickIcon(key){const tg=picker.target;picker={open:false,target:null};
   render();}
 function currentTargetIcon(){const tg=picker.target;if(!tg)return null;if(tg.kind==='task'){const t=store.tasks.find(x=>x.id===tg.id);return t&&t.icon;}if(tg.kind==='composer')return view.composerIcon;if(tg.kind==='project'){const p=store.projects.find(x=>x.id===tg.id);return p&&p.icon;}if(tg.kind==='tag'){const t=store.tags.find(x=>x.id===tg.id);return t&&t.icon;}return null;}
 function targetLabel(){const tg=picker.target;if(!tg)return '';if(tg.kind==='composer')return 'New task';if(tg.kind==='task'){const t=store.tasks.find(x=>x.id===tg.id);return 'Task · '+(t?t.title:'');}if(tg.kind==='project'){const p=store.projects.find(x=>x.id===tg.id);return 'Project · '+(p?p.name:'');}if(tg.kind==='tag'){const t=store.tags.find(x=>x.id===tg.id);return 'Tag · '+(t?t.label:'');}return '';}
-function openPrompt(kind){promptS={open:true,kind,value:''};render();}
+function openPrompt(kind,opts){promptS={open:true,kind,value:(opts&&opts.value)||'',target:(opts&&opts.target)||null};render();}
 function closePrompt(){promptS.open=false;render();}
+const PROMPT_TITLES={project:'New project',tag:'New tag',lkfolder:'New folder',lkrename:'Rename folder'};
 function promptOk(){const inp=document.getElementById('otk-prompt');const name=((inp?inp.value:promptS.value)||'').trim();
+  // locker folders live in the locker index, not the task store — no task save/push here
+  if(promptS.kind==='lkfolder'||promptS.kind==='lkrename'){const k=promptS.kind,t=promptS.target;promptS.open=false;if(k==='lkfolder')lockerCreateFolder(name);else lockerRenameFolder(t,name);render();return;}
   if(promptS.kind==='project'){const id='p'+uid();const code='P'+String(store.projects.length+1).padStart(2,'0');store.projects.push({id,code,name:name||'Untitled',icon:PROJ_ICON_CYCLE[store.projects.length%PROJ_ICON_CYCLE.length],tagIds:[]});view.projectId=id;view.tags=[];view.search='';view.expanded={};}
   else if(promptS.kind==='tag'){if(name){const id='tag'+uid();store.tags.push({id,label:name,icon:'sine'});const p=currentProject();if(p&&!p.tagIds.includes(id))p.tagIds.push(id);}}
   promptS.open=false;save();render();}
@@ -719,7 +955,7 @@ function renderMobile(){
   const spacer='<div style="height:max(8px,env(safe-area-inset-top));flex:none;"></div>';
   const header='<header style="flex:none;display:flex;align-items:center;gap:10px;padding:2px 10px 10px;">'
     +'<button data-act="openDrawer" title="Menu" style="display:flex;align-items:center;justify-content:center;width:40px;height:40px;flex:none;border:none;border-radius:var(--r2);background:transparent;color:var(--dim);cursor:pointer;">'+icon('menu',18)+'</button>'
-    +'<span style="color:var(--accent);display:flex;flex:none;">'+icon(loc?'patch':(proj?proj.icon:'sine'),Math.round(18*Math.min(g,1.3)))+'</span>'
+    +'<span style="color:var(--accent);display:flex;flex:none;">'+icon(loc?'lock':(proj?proj.icon:'sine'),Math.round(18*Math.min(g,1.3)))+'</span>'
     +'<span style="flex:1;min-width:0;font-size:16px;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-transform:var(--tt);">'+(loc?'Locker':esc(proj?proj.name:'OpenTasks'))+'</span>'
     +(loc?'':'<button data-act="toggleSearch" title="Search" style="display:flex;align-items:center;justify-content:center;width:40px;height:40px;flex:none;border:none;border-radius:var(--r2);background:transparent;color:var(--dim);cursor:pointer;">'+icon('search',15)+'</button>')+'</header>';
   const searchRow=(!loc&&view.searchOpen)?'<div style="flex:none;padding:0 12px 10px;"><div style="display:flex;align-items:center;gap:8px;padding:9px 12px;border:1px solid var(--line);border-radius:var(--r2);background:var(--bg2);"><span style="color:var(--faint);display:flex;">'+icon('search',15)+'</span><input id="otk-search" value="'+esc(view.search)+'" placeholder="Search…" style="flex:1;min-width:0;background:transparent;border:none;outline:none;font-family:inherit;font-size:14px;color:var(--text);" /></div></div>':'';
@@ -733,7 +969,7 @@ function renderMobile(){
       +'<aside style="position:absolute;top:0;left:0;bottom:0;z-index:31;width:80%;max-width:300px;background:var(--bg2);border-right:1px solid var(--line);display:flex;flex-direction:column;box-shadow:0 0 40px rgba(0,0,0,.5);"><div style="height:max(8px,env(safe-area-inset-top));flex:none;"></div>'
       +'<div style="display:flex;align-items:center;justify-content:space-between;padding:12px 14px 10px;"><span style="font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--faint);">Projects</span><button data-act="addProject" style="display:flex;align-items:center;justify-content:center;width:30px;height:30px;border:1px solid var(--line);border-radius:0;background:transparent;color:var(--dim);cursor:pointer;">'+icon('plus',15)+'</button></div>'
       +'<div style="flex:1;overflow-y:auto;padding:2px 10px;">'+(pr||'<div style="padding:12px;color:var(--faint);font-size:11px;">No projects.</div>')+'</div>'
-      +'<button data-act="setSection" data-s="locker" style="display:flex;align-items:center;gap:9px;padding:13px 16px;border:none;border-top:1px solid var(--line-soft);background:'+(loc?'var(--accent-dim)':'transparent')+';color:'+(loc?'var(--accent)':'var(--dim)')+';cursor:pointer;font-family:inherit;"><span style="display:flex;">'+icon('patch',16)+'</span><span style="font-size:11px;letter-spacing:.04em;">Locker</span></button>'
+      +'<button data-act="setSection" data-s="locker" style="display:flex;align-items:center;gap:9px;padding:13px 16px;border:none;border-top:1px solid var(--line-soft);background:'+(loc?'var(--accent-dim)':'transparent')+';color:'+(loc?'var(--accent)':'var(--dim)')+';cursor:pointer;font-family:inherit;"><span style="display:flex;">'+icon('lock',16)+'</span><span style="font-size:11px;letter-spacing:.04em;">Locker</span></button>'
       +'<button data-act="openSettings" style="display:flex;align-items:center;gap:9px;padding:13px 16px;border:none;border-top:1px solid var(--line-soft);background:transparent;color:var(--dim);cursor:pointer;font-family:inherit;"><span style="display:flex;">'+icon('sliders',16)+'</span><span style="font-size:11px;letter-spacing:.04em;">Settings</span></button>'
       +'<button data-act="openSync" style="display:flex;align-items:center;gap:9px;padding:13px 16px;border:none;border-top:1px solid var(--line-soft);background:transparent;cursor:pointer;"><span class="otk-syncdot" style="width:6px;height:6px;border-radius:50%;flex:none;"></span><span style="font-size:11px;letter-spacing:.04em;color:var(--dim);">Sync — GitHub Gist</span></button>'
       +'<div style="padding:0 16px calc(20px + env(safe-area-inset-bottom));display:flex;align-items:center;gap:7px;"><span class="otk-syncdot" style="width:6px;height:6px;border-radius:50%;flex:none;"></span><span style="font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint);">Local · offline</span></div></aside>';
@@ -747,7 +983,7 @@ function modalsHTML(){
   if(picker.open){
     h+='<div data-act="closePicker" style="position:fixed;inset:0;z-index:60;background:rgba(6,5,4,.74);display:flex;align-items:center;justify-content:center;padding:24px;"><div data-act="stop" style="width:460px;max-width:100%;display:flex;flex-direction:column;max-height:82vh;background:var(--surface2);border:1px solid var(--line-strong);border-radius:var(--r1);padding:17px;box-shadow:0 28px 80px rgba(0,0,0,.6);"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:3px;flex:none;"><span style="font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);">Choose an icon</span><button data-act="closePicker" title="Close" style="display:flex;align-items:center;justify-content:center;width:26px;height:26px;border:none;border-radius:var(--r3);background:transparent;color:var(--dim2);cursor:pointer;">'+icon('x',16)+'</button></div><p style="margin:0 0 10px;font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--faint);flex:none;">→ '+esc(targetLabel())+'</p><div style="display:flex;align-items:center;gap:8px;margin-bottom:11px;padding:7px 10px;border:1px solid var(--line);border-radius:var(--r2);background:var(--bg);flex:none;"><span style="display:flex;color:var(--faint);">'+icon('search',15)+'</span><input id="otk-iconsearch" value="'+esc(picker.query||'')+'" placeholder="Search icons…" style="flex:1;min-width:0;background:transparent;border:none;outline:none;font-family:inherit;font-size:12.5px;color:var(--text);" /></div><div id="otk-icongrid" style="flex:1;min-height:0;overflow-y:auto;display:grid;grid-template-columns:repeat(6,1fr);gap:7px;align-content:start;">'+pickerGridHTML()+'</div></div></div>';
   }
-  if(promptS.open){h+='<div data-act="promptCancel" style="position:fixed;inset:0;z-index:60;background:rgba(6,5,4,.74);display:flex;align-items:center;justify-content:center;padding:24px;"><div data-act="stop" style="width:360px;max-width:100%;background:var(--surface2);border:1px solid var(--line-strong);border-radius:var(--r1);padding:17px;box-shadow:0 28px 80px rgba(0,0,0,.6);"><span style="font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);">'+(promptS.kind==='project'?'New project':'New tag')+'</span><input id="otk-prompt" value="'+esc(promptS.value)+'" placeholder="Name…" style="width:100%;margin:13px 0;background:var(--bg);border:1px solid var(--line);border-radius:var(--r2);padding:9px 11px;font-family:inherit;font-size:13px;color:var(--text);outline:none;" /><div style="display:flex;justify-content:flex-end;gap:8px;"><button data-act="promptCancel" style="padding:8px 14px;border:1px solid var(--line-strong);border-radius:var(--r2);background:transparent;color:var(--dim);font-family:inherit;font-size:11px;letter-spacing:.06em;text-transform:uppercase;cursor:pointer;">Cancel</button><button data-act="promptOk" style="padding:8px 16px;border:none;border-radius:var(--r2);background:var(--accent);color:var(--on-accent);font-family:inherit;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;cursor:pointer;">OK</button></div></div></div>';}
+  if(promptS.open){h+='<div data-act="promptCancel" style="position:fixed;inset:0;z-index:60;background:rgba(6,5,4,.74);display:flex;align-items:center;justify-content:center;padding:24px;"><div data-act="stop" style="width:360px;max-width:100%;background:var(--surface2);border:1px solid var(--line-strong);border-radius:var(--r1);padding:17px;box-shadow:0 28px 80px rgba(0,0,0,.6);"><span style="font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);">'+(PROMPT_TITLES[promptS.kind]||'Name')+'</span><input id="otk-prompt" value="'+esc(promptS.value)+'" placeholder="Name…" style="width:100%;margin:13px 0;background:var(--bg);border:1px solid var(--line);border-radius:var(--r2);padding:9px 11px;font-family:inherit;font-size:13px;color:var(--text);outline:none;" /><div style="display:flex;justify-content:flex-end;gap:8px;"><button data-act="promptCancel" style="padding:8px 14px;border:1px solid var(--line-strong);border-radius:var(--r2);background:transparent;color:var(--dim);font-family:inherit;font-size:11px;letter-spacing:.06em;text-transform:uppercase;cursor:pointer;">Cancel</button><button data-act="promptOk" style="padding:8px 16px;border:none;border-radius:var(--r2);background:var(--accent);color:var(--on-accent);font-family:inherit;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;cursor:pointer;">OK</button></div></div></div>';}
   if(syncOpen){const connected=cloudOn();h+='<div data-act="closeSync" style="position:fixed;inset:0;z-index:60;background:rgba(6,5,4,.74);display:flex;align-items:center;justify-content:center;padding:24px;"><div data-act="stop" style="width:450px;max-width:100%;background:var(--surface2);border:1px solid var(--line-strong);border-radius:var(--r1);padding:18px;box-shadow:0 28px 80px rgba(0,0,0,.6);"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;"><span style="font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);">Sync — GitHub Gist</span><button data-act="closeSync" title="Close" style="display:flex;align-items:center;justify-content:center;width:26px;height:26px;border:none;border-radius:var(--r3);background:transparent;color:var(--dim2);cursor:pointer;">'+icon('x',16)+'</button></div>'
     +'<p style="margin:0 0 14px;font-size:11px;line-height:1.6;color:var(--dim2);">Classic token, <span style="color:var(--dim);">gist</span> scope. Stored on this device only. Empty Gist ID = create.</p>'
     +'<label style="display:block;font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--faint);margin-bottom:5px;">Token</label><input id="otk-token" type="password" value="'+esc(cloud.token)+'" placeholder="ghp_…" style="width:100%;margin-bottom:12px;background:var(--bg);border:1px solid var(--line);border-radius:var(--r2);padding:9px 11px;font-family:inherit;font-size:12.5px;color:var(--text);outline:none;" />'
@@ -792,12 +1028,13 @@ function attachInputs(scope){
   if(scope===document){
     const c=document.getElementById('otk-composer');if(c){c.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();addTask();}});c.addEventListener('input',()=>{c.style.height='auto';c.style.height=Math.min(c.scrollHeight,120)+'px';});if(!isMobile()&&!picker.open&&!promptS.open&&!syncOpen&&!settingsOpen)c.focus();}
     const s=document.getElementById('otk-search');if(s){s.addEventListener('input',()=>{view.search=s.value;refreshList();});if(view.searchOpen&&isMobile())s.focus();}
-    const p=document.getElementById('otk-prompt');if(p){p.addEventListener('input',()=>{promptS.value=p.value;});p.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();promptOk();}if(e.key==='Escape')closePrompt();});setTimeout(()=>p.focus(),20);}
+    const p=document.getElementById('otk-prompt');if(p){p.addEventListener('input',()=>{promptS.value=p.value;});p.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();promptOk();}if(e.key==='Escape')closePrompt();});setTimeout(()=>{p.focus();try{if(!promptS._sel){promptS._sel=true;p.select();}else{const L=p.value.length;p.setSelectionRange(L,L);}}catch(e){}},20);}
     const _is=document.getElementById('otk-iconsearch');if(_is){_is.addEventListener('input',()=>{picker.query=_is.value;const _g=document.getElementById('otk-icongrid');if(_g)_g.innerHTML=pickerGridHTML();});if(!isMobile())setTimeout(()=>_is.focus(),20);}
     const gl=document.getElementById('otk-glyph');if(gl){gl.addEventListener('input',()=>{const v=document.getElementById('otk-glyphval');if(v)v.textContent=parseFloat(gl.value).toFixed(2)+'×';});gl.addEventListener('change',()=>setSetting('glyphes',gl.value));}
     if(_focusSub){const si=document.querySelector('.otk-subdraft[data-id="'+_focusSub+'"]');_focusSub=null;if(si)si.focus();}
     if(view.titleEdit){const tt=document.querySelector('.otk-title[data-id="'+view.titleEdit+'"]');if(tt){tt.focus();const L=tt.value.length;try{tt.setSelectionRange(L,L);}catch(e){}}}
-    const fi=document.getElementById('otk-file');if(fi)fi.addEventListener('change',()=>{lockerUpload(fi.files);fi.value='';});
+    const fi=document.getElementById('otk-file');if(fi)fi.addEventListener('change',()=>{lockerUpload([...fi.files]);fi.value='';});
+    const fp=document.getElementById('otk-photo');if(fp)fp.addEventListener('change',()=>{lockerUpload([...fp.files]);fp.value='';});
     const dz=document.getElementById('otk-dz');if(dz){dz.addEventListener('dragover',e=>{e.preventDefault();dz.style.borderColor='var(--accent)';});dz.addEventListener('dragleave',()=>{dz.style.borderColor='';});dz.addEventListener('drop',e=>{e.preventDefault();dz.style.borderColor='';if(e.dataTransfer&&e.dataTransfer.files)lockerUpload(e.dataTransfer.files);});}
     const lks=document.getElementById('otk-lksearch');if(lks)lks.addEventListener('input',()=>{view.lkSearch=lks.value;refreshLkList();});
     wireLkAudio(document);
@@ -841,6 +1078,17 @@ document.getElementById('app').addEventListener('click',e=>{
     case 'toggleDeskNav':view.deskNav=!view.deskNav;render();break;
     case 'setSection':setSection(d.s);break;
     case 'lkPick':{const fi=document.getElementById('otk-file');if(fi)fi.click();break;}
+    case 'lkPickPhoto':{const fi=document.getElementById('otk-photo');if(fi)fi.click();break;}
+    case 'lkOpenFolder':lkSetFolder(d.id);break;
+    case 'lkCrumb':lkSetFolder(d.id||null);break;
+    case 'lkNewFolder':openPrompt('lkfolder');break;
+    case 'lkFolderMenu':view.lkFolderMenu=(view.lkFolderMenu===d.id?null:d.id);view.lkMove=null;render();break;
+    case 'lkRenameFolder':{const fo=lkFolder(d.id);if(fo)openPrompt('lkrename',{target:fo.id,value:fo.name});break;}
+    case 'lkMoveOpen':view.lkMove=(view.lkMove&&view.lkMove.id===d.id)?null:{kind:d.kind,id:d.id};render();break;
+    case 'lkMoveTo':if(d.kind==='folder')lockerMoveFolder(d.id,d.to||null);else lockerMoveItem(d.id,d.to||null);break;
+    case 'lkDeleteFolder':lockerDeleteFolder(d.id);break;
+    case 'lkCopy':lockerCopy(d.id,el);break;
+    case 'lkShare':lockerShare(d.id);break;
     case 'lkExpand':{const id=d.id;if(view.lkExpanded[id])delete view.lkExpanded[id];else{view.lkExpanded[id]=true;lockerEnsureMedia(id);}render();break;}
     case 'lkDownload':lockerDownload(d.id);break;
     case 'lkDelete':lockerDelete(d.id);break;
@@ -863,13 +1111,24 @@ document.getElementById('app').addEventListener('contextmenu',e=>{const el=e.tar
 /* ============================ startup ============================ */
 render();
 if(cloudOn())cloudPull();
-if(cloudOn()&&encOn())lockerPull().then(()=>{if(view.section==='locker')render();});
+// service worker = Android share target only (it never caches the app, so updates stay instant)
+if('serviceWorker' in navigator&&location.protocol!=='file:')navigator.serviceWorker.register('sw.js').catch(()=>{});
+if(/[?&]share=1\b/.test(location.search)){try{history.replaceState(null,'',location.pathname+location.hash);}catch(e){}}
+const _lkBoot=(cloudOn()&&encOn())?lockerPull().then(()=>{if(view.section==='locker')render();}):Promise.resolve();
+_lkBoot.then(()=>importShared());
+// paste an image/file anywhere in the Locker (e.g. a screenshot) to upload it into the current folder
+document.addEventListener('paste',e=>{
+  if(view.section!=='locker'||!lockerReady())return;const a=document.activeElement;if(a&&(a.tagName==='INPUT'||a.tagName==='TEXTAREA'||a.isContentEditable))return;
+  const fs=e.clipboardData&&e.clipboardData.files;if(!fs||!fs.length)return;e.preventDefault();
+  const files=[...fs].map(f=>(f.name&&!/^image\.\w+$/i.test(f.name))?f:new File([f],'pasted-'+stampName()+'.'+(((f.type||'').split('/')[1]||'bin').replace('jpeg','jpg')),{type:f.type}));
+  lockerUpload(files).then(ok=>{const n=ok.filter(Boolean).length;if(n)toast(n+' pasted file'+(n===1?'':'s')+' added to '+lkFolderLabel(view.lkFolder));});
+});
 let _wasMobile=isMobile();
 MOBILE_Q.addEventListener('change',()=>{_wasMobile=isMobile();render();});
 window.addEventListener('resize',()=>{if(isMobile()!==_wasMobile){_wasMobile=isMobile();render();}});
 function canAutoPull(){if(!cloudOn()||pushTimer||!navigator.onLine)return false;if(picker.open||promptS.open||syncOpen||settingsOpen)return false;const a=document.activeElement,t=a&&a.tagName;if(t==='TEXTAREA')return false;if(t==='INPUT'&&(a.value||'').trim())return false;return true;}
 setInterval(()=>{if(canAutoPull())cloudPull();},45000);
-setInterval(()=>{if(view.section==='locker'&&lockerReady()&&!Object.keys(lkUploads).length&&!view.lkLightbox){const b=lockerIndex.map(i=>i.id).join(',');lockerPull().then(()=>{if(lockerIndex.map(i=>i.id).join(',')!==b)render();lockerPrefetch();});}},5000);
+setInterval(()=>{if(view.section==='locker'&&lockerReady()&&!Object.keys(lkUploads).length&&!view.lkLightbox&&!promptS.open){const b=lkSig();lockerPull().then(()=>{if(lkSig()!==b)lkRefresh();lockerPrefetch();});}},5000);
 window.addEventListener('online',()=>{if(cloudOn())cloudPull();});
 })();
 </script>
