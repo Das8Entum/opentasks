@@ -27,12 +27,13 @@ I wanted a notepad replacement to jot DSP project ideas, sorted by project and c
 **Look & feel**
 - Theme engine: backgrounds × accent colors, 5 monospace fonts, corner radius, Lines/Cards density
 - **PWA**: installable on desktop *and* mobile, runs full-screen (no browser chrome), safe-area aware
-- Mobile-native ergonomics: swipe to complete/delete, bottom sheets, FAB, drawer
+- Mobile-native ergonomics: swipe to complete/delete, bottom sheets, FAB, drawer, Tasks/Locker switch in the header
+- Reopens where you left it: section, project, Locker folder and desktop side panel survive a reload
 
 **Optional layers** (each independent — see [Setup](#setup))
 - 🔄 **Sync** across devices via a private **GitHub Gist**
 - 🔐 **Vault**: end-to-end encryption of your data (AES-256-GCM)
-- 🗄️ **Locker**: an encrypted media tunnel — upload files on one device, read them on another, previewed in-app (image / audio / video / PDF / text). Nested folders (create, rename, move, delete), import straight from the photo gallery, paste screenshots with Ctrl+V, copy images/text back to the clipboard, and on Android **share files to OpenTasks** from any app
+- 🗄️ **Locker**: an encrypted media tunnel — upload files on one device, read them on another, previewed in-app (image / audio / video / PDF / text). Nested folders (create, rename, move, delete), import straight from the photo gallery, paste screenshots with Ctrl+V, copy images/text back to the clipboard, and on Android **share files to OpenTasks** from any app. Select several files (long-press on touch, the file icon, or Ctrl/Shift-click) to move, share or delete them in one go
 
 ## What you need (by layer)
 

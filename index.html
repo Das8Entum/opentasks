@@ -33,6 +33,14 @@
   #app{height:100vh;height:100dvh}
   [data-act]{-webkit-tap-highlight-color:transparent}
   @media(max-width:640px){#otk-list,#otk-scroll{scrollbar-width:none;-ms-overflow-style:none}#otk-list::-webkit-scrollbar,#otk-scroll::-webkit-scrollbar{display:none}}
+  /* locker tiles: the kind icon doubles as a selection checkbox; delete appears on hover (mouse only) */
+  .otk-cb{display:none;align-items:center;justify-content:center;width:18px;height:18px;border-radius:4px;border:1.5px solid var(--dim2);color:var(--on-accent)}
+  .otk-cb.on{border-color:var(--accent);background:var(--accent)}
+  .otk-picking .otk-kic{display:none!important}.otk-picking .otk-cb{display:flex}
+  .otk-hov{visibility:hidden}
+  @media(hover:hover){.otk-lkrow:hover .otk-hov{visibility:visible}.otk-lkrow:hover .otk-pick .otk-kic{display:none!important}.otk-lkrow:hover .otk-pick .otk-cb{display:flex}.otk-hov:hover{background:rgba(224,90,70,.14)!important}}
+  @media(hover:none){.otk-hov{display:none!important}}
+  .otk-lkhead{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
   @media (display-mode: window-controls-overlay){
     .otk-topbar{-webkit-app-region:drag;padding-left:max(14px,env(titlebar-area-x,14px)) !important;padding-right:max(14px,calc(100vw - env(titlebar-area-x,0px) - env(titlebar-area-width,100vw))) !important}
     .otk-topbar button,.otk-topbar input,.otk-topbar [data-act]{-webkit-app-region:no-drag}
@@ -169,7 +177,12 @@ let settings=loadSettings();
 
 /* ============================ state ============================ */
 let store=load();
-let view={projectId:null,tags:[],search:'',composerIcon:'sine',expanded:{},drawer:false,searchOpen:false,tagsOpen:false,editorTagsOpen:{},titleEdit:null,deskNav:true,section:'tasks',lkExpanded:{},lkFilter:'ALL',lkSort:'recent',lkFilterOpen:false,lkSearch:'',lkAttachOpen:null,lkLightbox:null,lkFolder:(()=>{try{return localStorage.getItem('otk.lkfolder')||null;}catch(e){return null;}})(),lkFolderMenu:null,lkMove:null};
+let view={projectId:null,tags:[],search:'',composerIcon:'sine',expanded:{},drawer:false,searchOpen:false,tagsOpen:false,editorTagsOpen:{},titleEdit:null,deskNav:true,section:'tasks',lkExpanded:{},lkFilter:'ALL',lkSort:'recent',lkFilterOpen:false,lkSearch:'',lkAttachOpen:null,lkLightbox:null,lkFolder:(()=>{try{return localStorage.getItem('otk.lkfolder')||null;}catch(e){return null;}})(),lkFolderMenu:null,lkMove:null,lkSel:{}};
+/* where you were (section, project, desktop side panel) survives a reload */
+const NAV_KEY="otk.nav";
+(()=>{try{const n=JSON.parse(localStorage.getItem(NAV_KEY)||'null');if(n&&typeof n==='object'){if(n.section==='tasks'||n.section==='locker')view.section=n.section;if(typeof n.projectId==='string')view.projectId=n.projectId;if(typeof n.deskNav==='boolean')view.deskNav=n.deskNav;}}catch(e){}})();
+let _navSaved="";
+function saveNav(){const s=JSON.stringify({section:view.section,projectId:view.projectId,deskNav:view.deskNav});if(s===_navSaved)return;_navSaved=s;try{localStorage.setItem(NAV_KEY,s);}catch(e){}}
 let subDraft={};
 let picker={open:false,target:null};
 let promptS={open:false,kind:'project',value:''};
@@ -429,10 +442,11 @@ async function lockerCopy(id,btn){const it=lockerIndex.find(x=>x.id===id);if(!it
     lkFlash(btn);toast(k==='image'?'Image copied to clipboard':'Text copied to clipboard');
   }catch(e){toast((e&&e.message)||'Copy failed');}}
 const lkCanShare=()=>typeof navigator.canShare==='function'&&typeof navigator.share==='function';
-async function lockerShare(id){const it=lockerIndex.find(x=>x.id===id);if(!it)return;
-  try{const b=await lkBlobOf(it);const f=new File([b],it.name,{type:it.type||b.type||'application/octet-stream'});
-    if(!navigator.canShare({files:[f]}))throw new Error('Sharing this file is not supported here');
-    await navigator.share({files:[f],title:it.name});}
+function lockerShare(id){return lockerShareMany([id]);}
+async function lockerShareMany(ids){const its=ids.map(id=>lockerIndex.find(x=>x.id===id)).filter(Boolean);if(!its.length)return;
+  try{const files=await Promise.all(its.map(it=>lkBlobOf(it).then(b=>new File([b],it.name,{type:it.type||b.type||'application/octet-stream'}))));
+    if(!navigator.canShare({files}))throw new Error(files.length===1?'Sharing this file is not supported here':'Sharing these files together is not supported here');
+    await navigator.share(files.length===1?{files,title:its[0].name}:{files});}
   catch(e){if(e&&e.name==='AbortError')return;toast(e&&e.name==='NotAllowedError'?'Tap Share once more':((e&&e.message)||'Share failed'));}}
 
 /* ---- Android share target: the service worker (sw.js) parks shared files in IndexedDB, we import them here ---- */
@@ -459,30 +473,78 @@ async function importShared(){
   finally{_shareBusy=false;}
 }
 async function lockerDownload(id){const item=lockerIndex.find(x=>x.id===id);if(!item)return;try{const blob=await lockerBlob(item);const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=item.name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),15000);}catch(e){alert("Download failed: "+(e.message||e));}}
-async function lockerDelete(id){const item=lockerIndex.find(x=>x.id===id);if(!item)return;if(!confirm('Delete "'+item.name+'" from the locker?'))return;for(let i=0;i<item.chunks;i++)lkDelObj(item.id+"/"+i);lkTomb[id]=Date.now();lockerIndex=lockerIndex.filter(x=>x.id!==id);try{const m=lkMedia[id];if(m&&m.url)URL.revokeObjectURL(m.url);}catch(e){}delete lkMedia[id];delete view.lkExpanded[id];if(view.lkLightbox===id)view.lkLightbox=null;try{await lockerPush();}catch(e){}render();}
-function setSection(s){if(s!=='locker'){lockerRevokeMedia();view.lkExpanded={};}view.section=s;view.drawer=false;view.lkLightbox=null;view.lkFilterOpen=false;view.lkAttachOpen=null;view.lkFolderMenu=null;view.lkMove=null;render();if(s==='locker'){if(!lockerLoaded&&cloudOn()&&encOn())lockerPull().then(()=>{render();lockerPrefetch();});else lockerPrefetch();}}
-function sectionToggleHTML(){const t=(s,l)=>'<button data-act="setSection" data-s="'+s+'" style="padding:5px 11px;border:none;border-radius:var(--r3);cursor:pointer;font-family:inherit;font-size:10px;letter-spacing:.1em;text-transform:uppercase;background:'+(view.section===s?'var(--accent-soft)':'transparent')+';color:'+(view.section===s?'var(--accent)':'var(--dim2)')+';">'+l+'</button>';return '<div style="display:flex;gap:2px;flex:none;border:1px solid var(--line);border-radius:var(--r3);padding:2px;">'+t('tasks','Tasks')+t('locker','Locker')+'</div>';}
+function lockerDelete(id){return lockerDeleteMany([id]);}
+/* one confirm and one index push, however many files */
+async function lockerDeleteMany(ids){
+  const items=ids.map(id=>lockerIndex.find(x=>x.id===id)).filter(Boolean);if(!items.length)return;
+  if(!confirm(items.length===1?'Delete "'+items[0].name+'" from the locker?':'Delete '+items.length+' files from the locker? This cannot be undone.'))return;
+  const now=Date.now(),gone=new Set(items.map(x=>x.id));
+  items.forEach(it=>{for(let i=0;i<it.chunks;i++)lkDelObj(it.id+'/'+i);lkTomb[it.id]=now;try{const m=lkMedia[it.id];if(m&&m.url)URL.revokeObjectURL(m.url);}catch(e){}delete lkMedia[it.id];delete view.lkExpanded[it.id];delete view.lkSel[it.id];});
+  lockerIndex=lockerIndex.filter(x=>!gone.has(x.id));if(view.lkLightbox&&gone.has(view.lkLightbox))view.lkLightbox=null;view.lkMove=null;
+  render();try{await lockerPush();}catch(e){}
+  toast(items.length===1?'Deleted "'+items[0].name+'"':items.length+' files deleted');}
+function lockerMoveMany(ids,to){to=to||null;const now=Date.now();let n=0;
+  ids.forEach(id=>{const it=lockerIndex.find(x=>x.id===id);if(it&&(it.folder||null)!==to){it.folder=to;it.mt=now;n++;}});
+  view.lkMove=null;view.lkSel={};render();if(n)lockerPushDebounced();
+  toast(n?'Moved '+n+' file'+(n===1?'':'s')+' to '+lkFolderLabel(to):'Already in '+lkFolderLabel(to));}
+
+/* ---- multi-selection (files only; folders stay inert while selecting) ---- */
+let _lkAnchor=null;
+function lkSelIds(){return Object.keys(view.lkSel);}
+/* the selection never outlives what is on screen: navigation, filters or another device's edits shrink it */
+function lkSelPrune(){if(!lkSelIds().length)return;const vis=new Set(lkListModel().files.map(x=>x.id));for(const id in view.lkSel)if(!vis.has(id))delete view.lkSel[id];if(!lkSelIds().length&&view.lkMove&&view.lkMove.kind==='sel')view.lkMove=null;}
+function lkSelEnter(){view.lkExpanded={};view.lkFolderMenu=null;view.lkMove=null;view.lkFilterOpen=false;view.lkAttachOpen=null;}
+function lkSelect(id,range,force){const was=lkSelIds().length>0;
+  if(range&&_lkAnchor&&_lkAnchor!==id){const ids=lkListModel().files.map(x=>x.id),a=ids.indexOf(_lkAnchor),b=ids.indexOf(id);
+    if(a>=0&&b>=0){for(let i=Math.min(a,b);i<=Math.max(a,b);i++)view.lkSel[ids[i]]=true;}else view.lkSel[id]=true;}
+  else if(force||!view.lkSel[id])view.lkSel[id]=true;else delete view.lkSel[id];
+  _lkAnchor=id;if(!was&&lkSelIds().length)lkSelEnter();if(!lkSelIds().length)view.lkMove=null;render();}
+function lkSelAll(){const ids=lkListModel().files.map(x=>x.id);if(!ids.length)return;const was=lkSelIds().length>0;
+  if(ids.every(id=>view.lkSel[id]))view.lkSel={};else{ids.forEach(id=>{view.lkSel[id]=true;});if(!was)lkSelEnter();}view.lkMove=null;render();}
+function lkSelClear(){view.lkSel={};_lkAnchor=null;if(view.lkMove&&view.lkMove.kind==='sel')view.lkMove=null;render();}
+function lkSelCommonFolder(){let f;for(const id of lkSelIds()){const it=lockerIndex.find(x=>x.id===id);if(!it)continue;const g=it.folder||null;if(f===undefined)f=g;else if(f!==g)return undefined;}return f;}
+/* touch: long-press a file tile to start selecting (a mouse uses the checkbox, Ctrl/⌘-click or Shift-click) */
+let _lkPress=null,_lkPressEnd=0;
+function lkPressStart(id,e){
+  if(e.pointerType==='mouse'||e.target.closest('button'))return;
+  lkPressCancel();const x0=e.clientX,y0=e.clientY,p={id,fired:false};
+  p.mv=ev=>{if(!p.fired&&(Math.abs(ev.clientX-x0)>10||Math.abs(ev.clientY-y0)>10))lkPressCancel();};
+  p.t=setTimeout(()=>lkPressFire(p),420);
+  _lkPress=p;window.addEventListener('pointermove',p.mv);window.addEventListener('pointerup',lkPressUp);window.addEventListener('pointercancel',lkPressUp);}
+function lkPressFire(p){if(!p||p.fired||_lkPress!==p)return;p.fired=true;clearTimeout(p.t);try{if(navigator.vibrate)navigator.vibrate(12);}catch(e){}lkSelect(p.id,false,true);}
+function lkPressUp(){if(_lkPress&&_lkPress.fired)_lkPressEnd=Date.now();lkPressCancel();}
+function lkPressCancel(){const p=_lkPress;if(!p)return;_lkPress=null;clearTimeout(p.t);window.removeEventListener('pointermove',p.mv);window.removeEventListener('pointerup',lkPressUp);window.removeEventListener('pointercancel',lkPressUp);}
+function setSection(s){const same=view.section===s;if(s!=='locker'){lockerRevokeMedia();view.lkExpanded={};}view.section=s;view.drawer=false;view.lkLightbox=null;view.lkFilterOpen=false;view.lkAttachOpen=null;view.lkFolderMenu=null;view.lkMove=null;view.lkSel={};render();
+  if(!same){const sc=document.querySelector('[data-scroll]');if(sc)sc.scrollTop=0;}
+  if(s==='locker'){if(!lockerLoaded&&cloudOn()&&encOn())lockerPull().then(()=>{render();lockerPrefetch();});else lockerPrefetch();}}
+/* Tasks | Locker switch — text on desktop, icons only in the compact mobile header */
+function sectionToggleHTML(compact){const t=(s,l,ic)=>{const on=view.section===s;return '<button data-act="setSection" data-s="'+s+'" title="'+l+'" aria-label="'+l+'" aria-pressed="'+on+'" style="display:flex;align-items:center;justify-content:center;'+(compact?'width:36px;height:32px;padding:0;':'padding:5px 11px;')+'border:none;border-radius:var(--r3);cursor:pointer;font-family:inherit;font-size:10px;letter-spacing:.1em;text-transform:uppercase;background:'+(on?'var(--accent-soft)':'transparent')+';color:'+(on?'var(--accent)':'var(--dim2)')+';">'+(compact?icon(ic,17):l)+'</button>';};
+  return '<div style="display:flex;gap:2px;flex:none;border:1px solid var(--line);border-radius:var(--r3);padding:2px;">'+t('tasks','Tasks','checklist')+t('locker','Locker','lock')+'</div>';}
 function lkNotice(title,body){return '<main style="flex:1;display:flex;align-items:center;justify-content:center;text-align:center;padding:40px;"><div style="max-width:320px;color:var(--faint);font-size:12.5px;line-height:1.8;"><div style="color:var(--dim);text-transform:uppercase;letter-spacing:2px;font-size:11px;margin-bottom:10px;">'+title+'</div>'+body+'</div></main>';}
 function lockerMainHTML(mobile){
   const pad=mobile?'14px':'22px',g=G();
   if(!lockerOn())return lkNotice("Locker not set up","Open <b style=\"color:var(--accent)\">Sync</b> and add your Worker URL + Locker token at the bottom.");
   if(!cloudOn()||!encOn())return lkNotice("Vault required","The locker reuses your gist + passphrase. Connect <b style=\"color:var(--accent)\">Sync</b> and set a passphrase first.");
+  lkSelPrune();
   const tById=tagMap();const f=view.lkFilter||'ALL';
   const activeLabel=f==='ALL'?'All':(f.indexOf('type:')===0?(KINDMETA[f.slice(5)]||{label:f.slice(5)}).label:(tById[f.slice(4)]||{label:'Tag'}).label);
   const totalBytes=lockerIndex.reduce((s,it)=>s+(it.size||0),0);
   const up=Object.keys(lkUploads).map(id=>{const u=lkUploads[id];return '<div style="display:flex;align-items:center;gap:9px;padding:8px 11px;border:1px solid var(--line);border-radius:var(--r2);background:var(--surface2);margin-bottom:6px;"><span style="display:flex;flex:none;color:var(--accent);">'+icon('upload',14)+'</span><span style="flex:1;min-width:0;font-size:12px;color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(u.name)+'</span>'+(u.err?'<span style="font-size:10px;color:#e0705a;">'+esc(u.err)+'</span>':'<div style="width:90px;height:4px;border-radius:2px;background:var(--line);overflow:hidden;flex:none;"><div class="otk-lkprog" data-id="'+id+'" style="height:100%;width:'+Math.round(u.done/u.total*100)+'%;background:var(--accent);transition:width .2s;"></div></div>')+'</div>';}).join('');
   const errHtml=lkErr?'<div style="padding:9px 11px;border:1px solid #5a3230;border-radius:var(--r2);background:rgba(224,90,70,.1);color:#e0705a;font-size:11px;margin-bottom:10px;">'+esc(lkErr)+'</div>':'';
-  const pill='display:flex;align-items:center;gap:7px;padding:7px 11px;border:1px solid var(--line);border-radius:var(--r2);background:var(--bg2);color:var(--text2);font-family:inherit;font-size:10.5px;letter-spacing:.04em;text-transform:uppercase;cursor:pointer;';
   const global=!!((view.lkSearch||'').trim()||f!=='ALL');
-  // the mobile header already says "Locker" with the padlock, so the title is only repeated on desktop
-  const titleBar='<div style="display:flex;align-items:center;gap:11px;padding:'+(mobile?'4px':'16px')+' '+pad+' 10px;flex:none;flex-wrap:wrap;">'
+  // icon-only tools (filter, new folder) share the search row; the mobile header already says "Locker"
+  const sq='display:flex;align-items:center;justify-content:center;flex:none;width:34px;height:34px;padding:0;border:1px solid var(--line);border-radius:var(--r2);background:var(--bg2);color:var(--text2);font-family:inherit;cursor:pointer;';
+  const fHot=f!=='ALL'||view.lkFilterOpen;
+  const filterB='<div style="position:relative;flex:none;"><button data-act="lkFilterToggle" title="Filter &amp; sort'+(f!=='ALL'?' · '+esc(activeLabel):'')+'" aria-label="Filter and sort" style="'+sq+(fHot?'border-color:var(--accent-line);background:var(--accent-soft);color:var(--accent);':'')+'">'+icon('sliders',15)+'</button>'+(view.lkFilterOpen?('<div data-act="lkFilterClose" style="position:fixed;inset:0;z-index:40;"></div>'+lockerFilterMenuHTML()):'')+'</div>';
+  // new folders go into the folder you are in — meaningless while browsing results across all folders
+  const folderB='<button '+(global?'':'data-act="lkNewFolder" ')+'title="New folder here" aria-label="New folder" style="'+sq+(global?'opacity:.35;pointer-events:none;':'')+'">'+icon('folderplus',16)+'</button>';
+  const titleBar=lkSelIds().length?lkSelBarHTML(mobile,pad):('<div style="display:flex;align-items:center;gap:'+(mobile?'8px':'11px')+';padding:'+(mobile?'4px':'16px')+' '+pad+' 10px;flex:none;flex-wrap:wrap;">'
     +(mobile?'':'<span style="display:flex;color:var(--text2);flex:none;">'+icon('lock',Math.round(18*Math.min(g,1.3)))+'</span>'
     +'<h1 style="margin:0;font-size:15px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--text);flex:none;">Locker</h1>')
     +'<span style="font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--faint);flex:none;white-space:nowrap;">'+(mobile?'':'· ')+lockerIndex.length+' file'+(lockerIndex.length===1?'':'s')+' · '+fmtSize(totalBytes)+'</span>'
     +(mobile?'':'<span style="flex:1;min-width:12px;"></span>')
-    +'<div style="display:flex;align-items:center;gap:8px;'+(mobile?'flex:1;min-width:90px;':'flex:none;width:200px;max-width:44vw;')+'padding:7px 11px;border:1px solid var(--line);border-radius:var(--r2);background:var(--bg2);"><span style="display:flex;color:var(--faint);flex:none;">'+icon('search',14)+'</span><input id="otk-lksearch" value="'+esc(view.lkSearch)+'" placeholder="Search…" style="flex:1;min-width:0;background:transparent;border:none;outline:none;font-family:inherit;font-size:12px;color:var(--text2);" /></div>'
-    +'<div style="position:relative;flex:none;"><button data-act="lkFilterToggle" style="'+pill+'"><span style="display:flex;">'+icon('sliders',14)+'</span><span style="letter-spacing:.08em;">'+esc(activeLabel)+'</span><span style="display:flex;">'+icon('chevron',13)+'</span></button>'+(view.lkFilterOpen?('<div data-act="lkFilterClose" style="position:fixed;inset:0;z-index:40;"></div>'+lockerFilterMenuHTML()):'')+'</div>'
-    +'</div>';
+    +'<div style="display:flex;align-items:center;gap:8px;'+(mobile?'flex:1;min-width:90px;':'flex:none;width:200px;max-width:44vw;')+'height:34px;padding:0 11px;border:1px solid var(--line);border-radius:var(--r2);background:var(--bg2);"><span style="display:flex;color:var(--faint);flex:none;">'+icon('search',14)+'</span><input id="otk-lksearch" value="'+esc(view.lkSearch)+'" placeholder="Search…" style="flex:1;min-width:0;background:transparent;border:none;outline:none;font-family:inherit;font-size:12px;color:var(--text2);" /></div>'
+    +filterB+folderB+'</div>');
   const here=lkFolderLabel(view.lkFolder);
   const ib='display:flex;align-items:center;gap:6px;flex:none;align-self:stretch;padding:0 '+(mobile?'11px':'14px')+';border-radius:var(--r2);font-family:inherit;font-size:11px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;cursor:pointer;';
   // "Photos" opens the system photo picker (gallery); "Files" opens the generic file chooser
@@ -495,20 +557,41 @@ function lockerMainHTML(mobile){
   return '<main style="flex:1;min-width:0;display:flex;flex-direction:column;overflow:hidden;">'+titleBar+lkCrumbsHTML(pad,global)+importRow
     +'<div data-scroll style="flex:1;overflow-y:auto;padding:0 '+pad+' 24px;">'+errHtml+up+'<div id="otk-lklist">'+lockerListHTML()+'</div></div></main>';
 }
-/* breadcrumb: Locker › A › B, with Up and New folder */
+/* breadcrumb row — only when it says something: inside a folder (Up · padlock › A › B) or when
+   browsing results across all folders (with the active filter as a removable chip). Nothing at the top level. */
 function lkCrumbsHTML(pad,global){
   const seg='font-size:10.5px;letter-spacing:.07em;text-transform:uppercase;';
   let left;
-  if(global)left='<span style="display:flex;color:var(--faint);flex:none;">'+icon('search',13)+'</span><span style="'+seg+'color:var(--dim2);">Results in all folders</span>';
-  else{const parts=[{id:'',name:'Locker'}].concat(lkFolderPath(view.lkFolder).map(f=>({id:f.id,name:f.name})));
-    left=parts.map((p,i)=>{const last=i===parts.length-1;
-      return (i?'<span style="display:flex;flex:none;color:var(--faint);">'+icon('chevright',12)+'</span>':'')
+  if(global){const f=view.lkFilter||'ALL';let chip='';
+    if(f!=='ALL'){const tg=f.indexOf('tag:')===0?tagMap()[f.slice(4)]:null,km=f.indexOf('type:')===0?(KINDMETA[f.slice(5)]||{label:f.slice(5),icon:'archive'}):null;
+      const lab=km?km.label:(tg?tg.label:'Tag'),ic=km?km.icon:(tg?tg.icon:'flag');
+      chip='<button data-act="lkSetFilter" data-f="ALL" title="Clear filter" style="display:flex;align-items:center;gap:6px;margin-left:6px;padding:3px 6px 3px 8px;border:1px solid var(--accent-line);border-radius:var(--r3);background:var(--accent-soft);color:var(--text);font-family:inherit;'+seg+'cursor:pointer;"><span style="display:flex;color:var(--accent);">'+icon(ic,12)+'</span>'+esc(lab)+'<span style="display:flex;color:var(--dim);">'+icon('x',11)+'</span></button>';}
+    left='<span style="display:flex;color:var(--faint);flex:none;">'+icon('search',13)+'</span><span style="'+seg+'color:var(--dim2);">Results in all folders</span>'+chip;}
+  else if(view.lkFolder){const parts=lkFolderPath(view.lkFolder);
+    left='<button data-act="lkCrumb" data-id="" title="Locker (top level)" aria-label="Locker" style="display:flex;align-items:center;padding:3px 4px;border:none;border-radius:var(--r3);background:transparent;color:var(--dim);cursor:pointer;">'+icon('lock',13)+'</button>'
+      +parts.map((p,i)=>{const last=i===parts.length-1;
+      return '<span style="display:flex;flex:none;color:var(--faint);">'+icon('chevright',12)+'</span>'
         +(last?'<span style="'+seg+'padding:3px 2px;color:var(--text);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:240px;">'+esc(p.name)+'</span>'
               :'<button data-act="lkCrumb" data-id="'+p.id+'" style="'+seg+'padding:3px 4px;border:none;border-radius:var(--r3);background:transparent;color:var(--dim);font-family:inherit;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:160px;">'+esc(p.name)+'</button>');}).join('');}
-  const sq='display:flex;align-items:center;justify-content:center;flex:none;height:30px;border:1px solid var(--line);border-radius:var(--r2);background:var(--bg2);color:var(--text2);font-family:inherit;cursor:pointer;';
-  const upB=(!global&&view.lkFolder)?'<button data-act="lkCrumb" data-id="'+((lkFolder(view.lkFolder)||{}).parent||'')+'" title="Up one level" style="'+sq+'width:30px;">'+icon('arrowup',14)+'</button>':'';
-  const newB=global?'':'<button data-act="lkNewFolder" title="New folder here" style="'+sq+'gap:6px;padding:0 10px;font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;"><span style="display:flex;">'+icon('folderplus',15)+'</span>Folder</button>';
-  return '<div style="display:flex;align-items:center;gap:8px;padding:0 '+pad+' 10px;flex:none;">'+upB+'<div style="display:flex;align-items:center;gap:2px;flex:1;min-width:0;flex-wrap:wrap;">'+left+'</div>'+newB+'</div>';
+  else return '';
+  const upB=(!global&&view.lkFolder)?'<button data-act="lkCrumb" data-id="'+((lkFolder(view.lkFolder)||{}).parent||'')+'" title="Up one level" style="display:flex;align-items:center;justify-content:center;flex:none;width:30px;height:30px;border:1px solid var(--line);border-radius:var(--r2);background:var(--bg2);color:var(--text2);cursor:pointer;">'+icon('arrowup',14)+'</button>':'';
+  return '<div style="display:flex;align-items:center;gap:8px;padding:0 '+pad+' 10px;flex:none;">'+upB+'<div style="display:flex;align-items:center;gap:2px;flex:1;min-width:0;flex-wrap:wrap;">'+left+'</div></div>';
+}
+/* contextual bar that replaces the search row while files are selected */
+function lkSelBarHTML(mobile,pad){
+  const n=lkSelIds().length,all=lkListModel().files.length,everything=n>=all&&all>0;
+  const b='display:flex;align-items:center;justify-content:center;gap:6px;flex:none;height:34px;'+(mobile?'width:38px;padding:0;':'padding:0 12px;')+'border:1px solid var(--line);border-radius:var(--r2);background:var(--bg2);color:var(--text2);font-family:inherit;font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;cursor:pointer;';
+  const lab=t=>mobile?'':'<span>'+t+'</span>';
+  const moving=!!(view.lkMove&&view.lkMove.kind==='sel');
+  return '<div style="display:flex;align-items:center;gap:8px;padding:'+(mobile?'4px':'16px')+' '+pad+' 10px;flex:none;">'
+    +'<button data-act="lkSelClear" title="Clear selection (Esc)" aria-label="Clear selection" style="'+b+(mobile?'':'width:34px;padding:0;')+'">'+icon('x',16)+'</button>'
+    +'<span style="flex:1;min-width:0;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+n+' selected</span>'
+    +'<button data-act="lkSelAll" title="'+(everything?'Select none':'Select all')+'" aria-label="'+(everything?'Select none':'Select all')+'" style="'+b+'"><span class="otk-cb'+(everything?' on':'')+'" style="display:flex;width:16px;height:16px;">'+(everything?icon('check',12):'')+'</span>'+lab('All')+'</button>'
+    +'<div style="position:relative;flex:none;"><button data-act="lkMoveOpen" data-kind="sel" data-id="sel" title="Move to folder" aria-label="Move to folder" style="'+b+(moving?'border-color:var(--accent-line);background:var(--accent-soft);color:var(--text);':'')+'">'+icon('foldermove',15)+lab('Move')+'</button>'
+      +(moving?'<div data-act="lkMoveClose" style="position:fixed;inset:0;z-index:40;"></div><div data-act="stop" style="position:absolute;right:0;top:calc(100% + 7px);z-index:41;width:250px;max-width:calc(100vw - 28px);padding:6px;border:1px solid var(--line-strong);border-radius:var(--r1);background:var(--surface2);box-shadow:0 20px 50px rgba(0,0,0,.55);">'+lkMovePickerHTML('sel','sel')+'</div>':'')+'</div>'
+    +(lkCanShare()?'<button data-act="lkSelShare" title="Share" aria-label="Share" style="'+b+'">'+icon('share',15)+lab('Share')+'</button>':'')
+    +'<button data-act="lkSelDelete" title="Delete selected" aria-label="Delete selected" style="'+b+'border-color:#4a2c29;color:#e0806a;">'+icon('trash',15)+lab('Delete')+'</button>'
+    +'</div>';
 }
 function lockerFilterMenuHTML(){
   const tById=tagMap();const present={};lockerIndex.forEach(it=>{const k=mediaKind(it.type,it.name);present[k]=(present[k]||0)+1;});
@@ -525,8 +608,8 @@ function lockerFilterMenuHTML(){
 }
 /* Folder view: sub-folders then files of the current folder.
    Search or a filter switches to a flat view across ALL folders, each result showing its path. */
-function lockerListHTML(){
-  const mobile=isMobile(),tById=tagMap(),f=view.lkFilter||'ALL',q=(view.lkSearch||'').trim().toLowerCase(),global=!!(q||f!=='ALL');
+function lkListModel(){
+  const tById=tagMap(),f=view.lkFilter||'ALL',q=(view.lkSearch||'').trim().toLowerCase(),global=!!(q||f!=='ALL');
   let folders,files;
   if(global){
     files=lockerIndex.slice();
@@ -540,6 +623,11 @@ function lockerListHTML(){
   else if(sort==='size')files.sort((a,b)=>(b.size||0)-(a.size||0));
   else if(sort==='type')files.sort((a,b)=>mediaKind(a.type,a.name).localeCompare(mediaKind(b.type,b.name))||lkByName(a,b));
   else files.sort((a,b)=>(b.ts||0)-(a.ts||0));
+  return {global,folders,files};
+}
+function lockerListHTML(){
+  const mobile=isMobile(),{global,folders,files}=lkListModel();
+  if(!lockerLoaded&&!lkErr&&!lockerIndex.length&&!lockerFolders.length)return '<div style="padding:52px 20px;text-align:center;color:var(--faint);font-size:12px;line-height:1.7;">Decrypting the index…</div>';
   if(!folders.length&&!files.length){
     const msg=global?'No files match.<br/>Try a different filter or search.'
       :view.lkFolder?'This folder is empty.<br/>Import files here, or create a sub-folder.'
@@ -558,23 +646,27 @@ function lockerItemHTML(it,global,last){
   const dur=(m&&m.duration)||it.dur,dim=(m&&m.w&&m.h)?(m.w+'×'+m.h):'';
   const mr=[];if((k==='audio'||k==='video')&&dur)mr.push(fmtDur(dur));if((k==='image'||k==='video')&&dim)mr.push(dim);mr.push(fmtSize(it.size));if(global&&it.folder)mr.push(lkFolderLabel(it.folder));
   const when=fmtWhen(it.ts);
-  const copyB=(k==='image'||k==='text')?'<button data-act="lkCopy" data-id="'+it.id+'" title="Copy to clipboard" style="display:flex;flex:none;align-items:center;justify-content:center;padding:4px;border:none;background:transparent;color:var(--dim2);cursor:pointer;">'+icon('copy',15)+'</button>':'';
-  const chev='<span style="display:flex;flex:none;color:var(--faint);transition:transform .18s;transform:rotate('+(exp?'180deg':'0deg')+');">'+icon('chevron',mobile?16:15)+'</span>';
-  const ic='<span style="display:flex;flex:none;color:var(--accent);">'+icon(meta.icon,rowI)+'</span>';
+  // selection mode: a tap anywhere toggles the tile, and the per-tile actions step aside for the selection bar
+  const selMode=lkSelIds().length>0,sel=!!view.lkSel[it.id],act=selMode?'lkSelect':'lkExpand';
+  const copyB=(!selMode&&(k==='image'||k==='text'))?'<button data-act="lkCopy" data-id="'+it.id+'" title="Copy to clipboard" style="display:flex;flex:none;align-items:center;justify-content:center;padding:4px;border:none;background:transparent;color:var(--dim2);cursor:pointer;">'+icon('copy',15)+'</button>':'';
+  const delB=selMode?'':'<button data-act="lkDelete" data-id="'+it.id+'" class="otk-hov" title="Delete" aria-label="Delete" style="display:flex;flex:none;align-items:center;justify-content:center;padding:4px;border:none;border-radius:var(--r3);background:transparent;color:#e0806a;cursor:pointer;">'+icon('trash',15)+'</button>';
+  const chev=selMode?'':'<span style="display:flex;flex:none;color:var(--faint);transition:transform .18s;transform:rotate('+(exp?'180deg':'0deg')+');">'+icon('chevron',mobile?16:15)+'</span>';
+  // the kind icon doubles as the selection checkbox (Gmail-style) — a bigger hit area for the same footprint
+  const ic='<span data-act="lkSelect" data-id="'+it.id+'" class="otk-pick'+(selMode?' otk-picking':'')+'" title="Select" style="display:flex;align-items:center;justify-content:center;flex:none;width:'+(rowI+14)+'px;height:'+(rowI+14)+'px;margin:-7px;cursor:pointer;color:var(--accent);"><span class="otk-kic" style="display:flex;">'+icon(meta.icon,rowI)+'</span><span class="otk-cb'+(sel?' on':'')+'">'+(sel?icon('check',13):'')+'</span></span>';
   if(mobile){
-    const head='<div data-act="lkExpand" data-id="'+it.id+'" style="display:flex;align-items:center;gap:13px;padding:14px 16px;cursor:pointer;">'+ic
+    const head='<div class="otk-lkhead" data-act="'+act+'" data-id="'+it.id+'" data-lkfile="'+it.id+'" style="display:flex;align-items:center;gap:13px;padding:14px 16px;cursor:pointer;">'+ic
       +'<div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:4px;"><span style="font-size:13px;line-height:1.35;color:var(--text);white-space:normal;word-break:break-word;overflow-wrap:anywhere;">'+esc(it.name)+'</span>'
       +'<div style="display:flex;align-items:center;gap:8px;min-width:0;">'+(miniTags?'<span style="display:flex;gap:6px;flex:none;color:var(--dim2);">'+miniTags+'</span>':'')
       +'<span style="font-size:10px;letter-spacing:.03em;color:var(--faint);min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(mr.join(' · '))+'</span><span style="flex:1"></span>'
-      +'<span style="font-size:9.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--faint);flex:none;white-space:nowrap;">'+esc(when)+'</span></div></div>'+copyB+chev+'</div>';
-    return '<div style="margin:0 0 9px;border-radius:var(--r1);border:1px solid var(--line);overflow:hidden;background:var(--surface2);">'+head+(exp?lockerExpandHTML(it,k,m):'')+'</div>';
+      +'<span style="font-size:9.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--faint);flex:none;white-space:nowrap;">'+esc(when)+'</span></div></div>'+copyB+delB+chev+'</div>';
+    return '<div class="otk-lkrow" style="margin:0 0 9px;border-radius:var(--r1);border:1px solid '+(sel?'var(--accent-line)':'var(--line)')+';overflow:hidden;background:var(--surface2);'+(sel?'background-image:linear-gradient(var(--accent-dim),var(--accent-dim));':'')+'">'+head+(exp?lockerExpandHTML(it,k,m):'')+'</div>';
   }
-  const head='<div data-act="lkExpand" data-id="'+it.id+'" style="display:flex;align-items:center;gap:11px;padding:8px 12px;cursor:pointer;">'+ic
+  const head='<div class="otk-lkhead" data-act="'+act+'" data-id="'+it.id+'" data-lkfile="'+it.id+'" style="display:flex;align-items:center;gap:11px;padding:8px 12px;cursor:pointer;">'+ic
     +'<span style="flex:1;min-width:0;font-size:13px;line-height:1.3;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(it.name)+'</span>'
     +(miniTags?'<span style="display:flex;gap:5px;flex:none;color:var(--faint);">'+miniTags+'</span>':'')
     +'<span style="font-size:10px;letter-spacing:.03em;color:var(--faint);flex:none;white-space:nowrap;max-width:40%;overflow:hidden;text-overflow:ellipsis;">'+esc(mr.join(' · '))+'</span>'
-    +'<span style="font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint);min-width:52px;text-align:right;flex:none;white-space:nowrap;">'+esc(when)+'</span>'+copyB+chev+'</div>';
-  return '<div style="border-bottom:1px solid '+(last?'transparent':'var(--line-soft)')+';'+(exp?'background:var(--surface);':'')+'">'+head+(exp?lockerExpandHTML(it,k,m):'')+'</div>';
+    +'<span style="font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint);min-width:52px;text-align:right;flex:none;white-space:nowrap;">'+esc(when)+'</span>'+copyB+delB+chev+'</div>';
+  return '<div class="otk-lkrow" style="border-bottom:1px solid '+(last?'transparent':'var(--line-soft)')+';'+(sel?'background:var(--accent-dim);box-shadow:inset 2px 0 0 var(--accent);':(exp?'background:var(--surface);':''))+'">'+head+(exp?lockerExpandHTML(it,k,m):'')+'</div>';
 }
 /* folder tile: click opens it; the ⋯ button reveals Rename / Move / Delete */
 function lockerFolderHTML(fo,st,global,last){
@@ -584,21 +676,24 @@ function lockerFolderHTML(fo,st,global,last){
   const meta=[st.n+' file'+(st.n===1?'':'s')];if(nSub)meta.push(nSub+' folder'+(nSub===1?'':'s'));if(st.bytes)meta.push(fmtSize(st.bytes));if(global&&fo.parent)meta.push(lkFolderLabel(fo.parent));
   const when=fmtWhen(Math.max(fo.mt||0,fo.ts||0,st.last||0));
   const ic='<span style="display:flex;flex:none;color:var(--accent);">'+icon('folder',rowI)+'</span>';
-  const dots='<button data-act="lkFolderMenu" data-id="'+fo.id+'" title="Folder actions" style="display:flex;flex:none;align-items:center;justify-content:center;padding:4px;border:none;border-radius:var(--r3);background:'+(menu?'var(--accent-soft)':'transparent')+';color:'+(menu?'var(--text)':'var(--dim2)')+';cursor:pointer;">'+icon('dots',16)+'</button>';
+  // while files are selected, folders are not selectable: they dim and stay inert (no accidental navigation)
+  const selMode=lkSelIds().length>0,open=selMode?'':'data-act="lkOpenFolder" data-id="'+fo.id+'" ',inert=selMode?'opacity:.45;cursor:default;':'cursor:pointer;';
+  const delB=selMode?'':'<button data-act="lkDeleteFolder" data-id="'+fo.id+'" class="otk-hov" title="Delete folder" aria-label="Delete folder" style="display:flex;flex:none;align-items:center;justify-content:center;padding:4px;border:none;border-radius:var(--r3);background:transparent;color:#e0806a;cursor:pointer;">'+icon('trash',15)+'</button>';
+  const dots=selMode?'':'<button data-act="lkFolderMenu" data-id="'+fo.id+'" title="Folder actions" style="display:flex;flex:none;align-items:center;justify-content:center;padding:4px;border:none;border-radius:var(--r3);background:'+(menu?'var(--accent-soft)':'transparent')+';color:'+(menu?'var(--text)':'var(--dim2)')+';cursor:pointer;">'+icon('dots',16)+'</button>';
   const go='<span style="display:flex;flex:none;color:var(--faint);">'+icon('chevright',mobile?16:15)+'</span>';
-  const actions=menu?lkFolderActionsHTML(fo,moving,mobile):'';
+  const actions=(menu&&!selMode)?lkFolderActionsHTML(fo,moving,mobile):'';
   if(mobile){
-    const head='<div data-act="lkOpenFolder" data-id="'+fo.id+'" style="display:flex;align-items:center;gap:13px;padding:14px 16px;cursor:pointer;">'+ic
+    const head='<div '+open+'style="display:flex;align-items:center;gap:13px;padding:14px 16px;'+inert+'">'+ic
       +'<div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:4px;"><span style="font-size:13px;line-height:1.35;font-weight:600;color:var(--text);white-space:normal;word-break:break-word;overflow-wrap:anywhere;">'+esc(fo.name)+'</span>'
       +'<div style="display:flex;align-items:center;gap:8px;min-width:0;"><span style="font-size:10px;letter-spacing:.03em;color:var(--faint);min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(meta.join(' · '))+'</span><span style="flex:1"></span>'
-      +'<span style="font-size:9.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--faint);flex:none;white-space:nowrap;">'+esc(when)+'</span></div></div>'+dots+go+'</div>';
-    return '<div style="margin:0 0 9px;border-radius:var(--r1);border:1px solid var(--line);overflow:hidden;background:var(--surface2);">'+head+actions+'</div>';
+      +'<span style="font-size:9.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--faint);flex:none;white-space:nowrap;">'+esc(when)+'</span></div></div>'+delB+dots+go+'</div>';
+    return '<div class="otk-lkrow" style="margin:0 0 9px;border-radius:var(--r1);border:1px solid var(--line);overflow:hidden;background:var(--surface2);">'+head+actions+'</div>';
   }
-  const head='<div data-act="lkOpenFolder" data-id="'+fo.id+'" style="display:flex;align-items:center;gap:11px;padding:8px 12px;cursor:pointer;">'+ic
+  const head='<div '+open+'style="display:flex;align-items:center;gap:11px;padding:8px 12px;'+inert+'">'+ic
     +'<span style="flex:1;min-width:0;font-size:13px;line-height:1.3;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(fo.name)+'</span>'
     +'<span style="font-size:10px;letter-spacing:.03em;color:var(--faint);flex:none;white-space:nowrap;max-width:40%;overflow:hidden;text-overflow:ellipsis;">'+esc(meta.join(' · '))+'</span>'
-    +'<span style="font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint);min-width:52px;text-align:right;flex:none;white-space:nowrap;">'+esc(when)+'</span>'+dots+go+'</div>';
-  return '<div style="border-bottom:1px solid '+(last?'transparent':'var(--line-soft)')+';'+(menu?'background:var(--surface);':'')+'">'+head+actions+'</div>';
+    +'<span style="font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint);min-width:52px;text-align:right;flex:none;white-space:nowrap;">'+esc(when)+'</span>'+delB+dots+go+'</div>';
+  return '<div class="otk-lkrow" style="border-bottom:1px solid '+(last?'transparent':'var(--line-soft)')+';'+(actions?'background:var(--surface);':'')+'">'+head+actions+'</div>';
 }
 function lkFolderActionsHTML(fo,moving,mobile){
   const b='display:flex;align-items:center;gap:6px;padding:7px 12px;border-radius:var(--r2);font-family:inherit;font-size:11px;letter-spacing:.05em;text-transform:uppercase;cursor:pointer;';
@@ -612,7 +707,8 @@ function lkFolderActionsHTML(fo,moving,mobile){
 }
 /* destination list for Move — a folder can never be moved into itself or one of its descendants */
 function lkMovePickerHTML(kind,id){
-  const cur=kind==='folder'?((lkFolder(id)||{}).parent||null):((lockerIndex.find(x=>x.id===id)||{}).folder||null);
+  // for a selection, "current" is only marked when every selected file already sits in the same folder
+  const cur=kind==='folder'?((lkFolder(id)||{}).parent||null):kind==='sel'?lkSelCommonFolder():((lockerIndex.find(x=>x.id===id)||{}).folder||null);
   const banned=kind==='folder'?lkDescendants(id):new Set();
   const opts=[{id:null,name:'Locker',depth:0,root:true}].concat(lkFolderTree().map(t=>({id:t.f.id,name:t.f.name,depth:t.depth+1})));
   const rows=opts.filter(o=>!(o.id&&banned.has(o.id))).map(o=>{const here=(o.id||null)===cur;
@@ -744,7 +840,7 @@ function filteredTasks(proj){
 }
 
 /* ============================ handlers ============================ */
-function selectProject(id){lockerRevokeMedia();view.lkExpanded={};view.projectId=id;view.tags=[];view.search='';view.drawer=false;view.expanded={};view.titleEdit=null;view.section='tasks';render();const _l=document.querySelector('[data-scroll]');if(_l)_l.scrollTop=0;}
+function selectProject(id){lockerRevokeMedia();view.lkExpanded={};view.lkSel={};view.projectId=id;view.tags=[];view.search='';view.drawer=false;view.expanded={};view.titleEdit=null;view.section='tasks';render();const _l=document.querySelector('[data-scroll]');if(_l)_l.scrollTop=0;}
 function selectTag(id){if(id==='ALL'){view.tags=[];}else{const i=view.tags.indexOf(id);if(i>=0)view.tags.splice(i,1);else view.tags.push(id);}render();}
 function toggleTags(){view.tagsOpen=!view.tagsOpen;render();}
 function toggleEditorTags(id){view.editorTagsOpen[id]=!view.editorTagsOpen[id];render();}
@@ -953,11 +1049,13 @@ function tileListHTML(){
 function renderMobile(){
   const g=G();const proj=currentProject();const tById=tagMap();const loc=view.section==='locker';
   const spacer='<div style="height:max(8px,env(safe-area-inset-top));flex:none;"></div>';
-  const header='<header style="flex:none;display:flex;align-items:center;gap:10px;padding:2px 10px 10px;">'
+  // the Tasks | Locker switch sits in the header row itself (no extra height), pinned to the right edge so it never moves
+  const header='<header style="flex:none;display:flex;align-items:center;gap:8px;padding:2px 10px 10px;">'
     +'<button data-act="openDrawer" title="Menu" style="display:flex;align-items:center;justify-content:center;width:40px;height:40px;flex:none;border:none;border-radius:var(--r2);background:transparent;color:var(--dim);cursor:pointer;">'+icon('menu',18)+'</button>'
     +'<span style="color:var(--accent);display:flex;flex:none;">'+icon(loc?'lock':(proj?proj.icon:'sine'),Math.round(18*Math.min(g,1.3)))+'</span>'
     +'<span style="flex:1;min-width:0;font-size:16px;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-transform:var(--tt);">'+(loc?'Locker':esc(proj?proj.name:'OpenTasks'))+'</span>'
-    +(loc?'':'<button data-act="toggleSearch" title="Search" style="display:flex;align-items:center;justify-content:center;width:40px;height:40px;flex:none;border:none;border-radius:var(--r2);background:transparent;color:var(--dim);cursor:pointer;">'+icon('search',15)+'</button>')+'</header>';
+    +(loc?'':'<button data-act="toggleSearch" title="Search" style="display:flex;align-items:center;justify-content:center;width:38px;height:40px;flex:none;border:none;border-radius:var(--r2);background:transparent;color:var(--dim);cursor:pointer;">'+icon('search',15)+'</button>')
+    +sectionToggleHTML(true)+'</header>';
   const searchRow=(!loc&&view.searchOpen)?'<div style="flex:none;padding:0 12px 10px;"><div style="display:flex;align-items:center;gap:8px;padding:9px 12px;border:1px solid var(--line);border-radius:var(--r2);background:var(--bg2);"><span style="color:var(--faint);display:flex;">'+icon('search',15)+'</span><input id="otk-search" value="'+esc(view.search)+'" placeholder="Search…" style="flex:1;min-width:0;background:transparent;border:none;outline:none;font-family:inherit;font-size:14px;color:var(--text);" /></div></div>':'';
   const projTasks=proj?store.tasks.filter(t=>t.projectId===proj.id):[];
   const filterRow=(!loc&&proj)?('<div style="flex:none;padding:0 12px 10px;">'+filterButtonHTML(proj)+(view.tagsOpen?'<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:9px;">'+tagBarHTML(proj,projTasks,false)+'</div>':'')+'</div>'):'';
@@ -969,7 +1067,6 @@ function renderMobile(){
       +'<aside style="position:absolute;top:0;left:0;bottom:0;z-index:31;width:80%;max-width:300px;background:var(--bg2);border-right:1px solid var(--line);display:flex;flex-direction:column;box-shadow:0 0 40px rgba(0,0,0,.5);"><div style="height:max(8px,env(safe-area-inset-top));flex:none;"></div>'
       +'<div style="display:flex;align-items:center;justify-content:space-between;padding:12px 14px 10px;"><span style="font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--faint);">Projects</span><button data-act="addProject" style="display:flex;align-items:center;justify-content:center;width:30px;height:30px;border:1px solid var(--line);border-radius:0;background:transparent;color:var(--dim);cursor:pointer;">'+icon('plus',15)+'</button></div>'
       +'<div style="flex:1;overflow-y:auto;padding:2px 10px;">'+(pr||'<div style="padding:12px;color:var(--faint);font-size:11px;">No projects.</div>')+'</div>'
-      +'<button data-act="setSection" data-s="locker" style="display:flex;align-items:center;gap:9px;padding:13px 16px;border:none;border-top:1px solid var(--line-soft);background:'+(loc?'var(--accent-dim)':'transparent')+';color:'+(loc?'var(--accent)':'var(--dim)')+';cursor:pointer;font-family:inherit;"><span style="display:flex;">'+icon('lock',16)+'</span><span style="font-size:11px;letter-spacing:.04em;">Locker</span></button>'
       +'<button data-act="openSettings" style="display:flex;align-items:center;gap:9px;padding:13px 16px;border:none;border-top:1px solid var(--line-soft);background:transparent;color:var(--dim);cursor:pointer;font-family:inherit;"><span style="display:flex;">'+icon('sliders',16)+'</span><span style="font-size:11px;letter-spacing:.04em;">Settings</span></button>'
       +'<button data-act="openSync" style="display:flex;align-items:center;gap:9px;padding:13px 16px;border:none;border-top:1px solid var(--line-soft);background:transparent;cursor:pointer;"><span class="otk-syncdot" style="width:6px;height:6px;border-radius:50%;flex:none;"></span><span style="font-size:11px;letter-spacing:.04em;color:var(--dim);">Sync — GitHub Gist</span></button>'
       +'<div style="padding:0 16px calc(20px + env(safe-area-inset-bottom));display:flex;align-items:center;gap:7px;"><span class="otk-syncdot" style="width:6px;height:6px;border-radius:50%;flex:none;"></span><span style="font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint);">Local · offline</span></div></aside>';
@@ -1016,7 +1113,7 @@ function settingsHTML(){
 /* ============================ render + wiring ============================ */
 const MOBILE_Q=window.matchMedia('(max-width:640px)');
 function isMobile(){return MOBILE_Q.matches;}
-function render(){const _sl=document.querySelector('[data-scroll]');const _st=_sl?_sl.scrollTop:0;applyTheme();document.getElementById('app').innerHTML=(isMobile()?renderMobile():renderDesktop())+modalsHTML();attachInputs(document);refreshSyncDot();const _nl=document.querySelector('[data-scroll]');if(_nl&&_st)_nl.scrollTop=_st;}
+function render(){saveNav();const _sl=document.querySelector('[data-scroll]');const _st=_sl?_sl.scrollTop:0;applyTheme();document.getElementById('app').innerHTML=(isMobile()?renderMobile():renderDesktop())+modalsHTML();attachInputs(document);refreshSyncDot();const _nl=document.querySelector('[data-scroll]');if(_nl&&_st)_nl.scrollTop=_st;}
 function refreshList(){const el=document.getElementById('otk-list');if(!el)return;el.innerHTML=isMobile()?tileListHTML():listInnerHTML();attachInputs(el);}
 function attachInputs(scope){
   scope.querySelectorAll('.otk-title').forEach(el=>{const gr=()=>{el.style.height='auto';el.style.height=el.scrollHeight+'px';};el.addEventListener('input',()=>{setTitle(el.dataset.id,el.value);gr();});el.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key==='Escape'){e.preventDefault();view.titleEdit=null;render();}});el.addEventListener('blur',()=>{const id=el.dataset.id;setTimeout(()=>{if(view.titleEdit===id){view.titleEdit=null;render();}},0);});gr();});
@@ -1041,7 +1138,9 @@ function attachInputs(scope){
   }
 }
 document.getElementById('app').addEventListener('click',e=>{
-  const el=e.target.closest('[data-act]');if(!el)return;if(_suppressClick){_suppressClick=false;if(el.dataset.act==='toggleExpand')return;}const d=el.dataset,act=d.act;
+  const el=e.target.closest('[data-act]');if(!el)return;if(_suppressClick){_suppressClick=false;if(el.dataset.act==='toggleExpand')return;}
+  if(Date.now()-_lkPressEnd<450&&el.closest('[data-lkfile]'))return;   // the tap that ends a long-press must not toggle it back
+  const d=el.dataset,act=d.act;
   switch(act){
     case 'stop':return;
     case 'selectProject':selectProject(d.id);break;
@@ -1085,11 +1184,17 @@ document.getElementById('app').addEventListener('click',e=>{
     case 'lkFolderMenu':view.lkFolderMenu=(view.lkFolderMenu===d.id?null:d.id);view.lkMove=null;render();break;
     case 'lkRenameFolder':{const fo=lkFolder(d.id);if(fo)openPrompt('lkrename',{target:fo.id,value:fo.name});break;}
     case 'lkMoveOpen':view.lkMove=(view.lkMove&&view.lkMove.id===d.id)?null:{kind:d.kind,id:d.id};render();break;
-    case 'lkMoveTo':if(d.kind==='folder')lockerMoveFolder(d.id,d.to||null);else lockerMoveItem(d.id,d.to||null);break;
+    case 'lkMoveTo':if(d.kind==='folder')lockerMoveFolder(d.id,d.to||null);else if(d.kind==='sel')lockerMoveMany(lkSelIds(),d.to||null);else lockerMoveItem(d.id,d.to||null);break;
+    case 'lkMoveClose':view.lkMove=null;render();break;
+    case 'lkSelect':lkSelect(d.id,e.shiftKey);break;
+    case 'lkSelAll':lkSelAll();break;
+    case 'lkSelClear':lkSelClear();break;
+    case 'lkSelDelete':lockerDeleteMany(lkSelIds());break;
+    case 'lkSelShare':lockerShareMany(lkSelIds());break;
     case 'lkDeleteFolder':lockerDeleteFolder(d.id);break;
     case 'lkCopy':lockerCopy(d.id,el);break;
     case 'lkShare':lockerShare(d.id);break;
-    case 'lkExpand':{const id=d.id;if(view.lkExpanded[id])delete view.lkExpanded[id];else{view.lkExpanded[id]=true;lockerEnsureMedia(id);}render();break;}
+    case 'lkExpand':{const id=d.id;if(e.ctrlKey||e.metaKey||e.shiftKey){lkSelect(id,e.shiftKey);break;}if(view.lkExpanded[id])delete view.lkExpanded[id];else{view.lkExpanded[id]=true;lockerEnsureMedia(id);}render();break;}
     case 'lkDownload':lockerDownload(d.id);break;
     case 'lkDelete':lockerDelete(d.id);break;
     case 'lkToggleTag':lockerToggleTag(d.id,d.tid);break;
@@ -1106,7 +1211,20 @@ document.getElementById('app').addEventListener('click',e=>{
     case 'lkSeek':{const a=document.getElementById('otk-audio-'+d.id);if(a){const r=el.getBoundingClientRect();const frac=Math.max(0,Math.min(1,(e.clientX-r.left)/r.width));const dur=a.duration||(lkMedia[d.id]&&lkMedia[d.id].duration)||0;if(dur){a.currentTime=frac*dur;const c=document.getElementById('otk-wave-'+d.id);if(c)lkDrawWave(c,d.id);}}break;}
   }
 });
-document.getElementById('app').addEventListener('contextmenu',e=>{const el=e.target.closest('[data-act=selectProject]');if(el){e.preventDefault();deleteProject(el.dataset.id);}});
+document.getElementById('app').addEventListener('contextmenu',e=>{
+  // a touch long-press on a file tile selects it instead of opening the system menu (whichever fires first)
+  if(_lkPress){e.preventDefault();lkPressFire(_lkPress);return;}if(Date.now()-_lkPressEnd<800){e.preventDefault();return;}
+  const el=e.target.closest('[data-act=selectProject]');if(el){e.preventDefault();deleteProject(el.dataset.id);}});
+document.getElementById('app').addEventListener('pointerdown',e=>{const t=e.target.closest('[data-lkfile]');if(t)lkPressStart(t.dataset.lkfile,e);});
+/* locker keys: Esc clears the selection (or closes the viewer), Delete removes the selection, Ctrl/⌘+A selects every file shown */
+document.addEventListener('keydown',e=>{
+  if(view.section!=='locker'||picker.open||promptS.open||syncOpen||settingsOpen)return;
+  const a=document.activeElement;if(a&&(a.tagName==='INPUT'||a.tagName==='TEXTAREA'||a.isContentEditable))return;
+  if(e.key==='Escape'){if(view.lkLightbox){view.lkLightbox=null;render();}else if(lkSelIds().length)lkSelClear();return;}
+  if(view.lkLightbox)return;
+  if(e.key==='Delete'&&lkSelIds().length){e.preventDefault();lockerDeleteMany(lkSelIds());return;}
+  if((e.ctrlKey||e.metaKey)&&!e.altKey&&!e.shiftKey&&(e.key==='a'||e.key==='A')&&lockerReady()){const ids=lkListModel().files.map(x=>x.id);if(!ids.length)return;e.preventDefault();const was=lkSelIds().length>0;ids.forEach(id=>{view.lkSel[id]=true;});if(!was)lkSelEnter();render();}
+});
 
 /* ============================ startup ============================ */
 render();
@@ -1114,7 +1232,7 @@ if(cloudOn())cloudPull();
 // service worker = Android share target only (it never caches the app, so updates stay instant)
 if('serviceWorker' in navigator&&location.protocol!=='file:')navigator.serviceWorker.register('sw.js').catch(()=>{});
 if(/[?&]share=1\b/.test(location.search)){try{history.replaceState(null,'',location.pathname+location.hash);}catch(e){}}
-const _lkBoot=(cloudOn()&&encOn())?lockerPull().then(()=>{if(view.section==='locker')render();}):Promise.resolve();
+const _lkBoot=(cloudOn()&&encOn())?lockerPull().then(()=>{if(view.section==='locker'){render();lockerPrefetch();}}):Promise.resolve();
 _lkBoot.then(()=>importShared());
 // paste an image/file anywhere in the Locker (e.g. a screenshot) to upload it into the current folder
 document.addEventListener('paste',e=>{
