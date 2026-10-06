@@ -11,7 +11,7 @@
 <meta name="apple-mobile-web-app-title" content="OpenTasks">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icon-180.png">
-<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMDAgMTAwIiBzaGFwZS1yZW5kZXJpbmc9ImNyaXNwRWRnZXMiPjxyZWN0IHdpZHRoPSIxMDAiIGhlaWdodD0iMTAwIiBmaWxsPSIjMWExYTFhIj48L3JlY3Q+PHJlY3QgeD0iMjIiIHk9IjIwIiB3aWR0aD0iMzMiIGhlaWdodD0iMTIiIGZpbGw9IiNmMmYyZjIiPjwvcmVjdD48cmVjdCB4PSIyMiIgeT0iNDQiIHdpZHRoPSIzMyIgaGVpZ2h0PSIxMiIgZmlsbD0iI2YyZjJmMiI+PC9yZWN0PjxyZWN0IHg9IjM0IiB5PSI2OCIgd2lkdGg9IjMzIiBoZWlnaHQ9IjEyIiBmaWxsPSIjZjJmMmYyIj48L3JlY3Q+PHJlY3QgeD0iNjIiIHk9IjIwIiB3aWR0aD0iMTIiIGhlaWdodD0iMTIiIGZpbGw9IiM2M2Q2OGEiPjwvcmVjdD48L3N2Zz4=">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9Ii01MCAtOTcuMiA2MjcgNjI3Ij48cmVjdCB4PSItNTAiIHk9Ii05Ny4yIiB3aWR0aD0iNjI3IiBoZWlnaHQ9IjYyNyIgZmlsbD0iIzBkMGQwZCIvPjxwYXRoIGZpbGw9IiNmZmYiIGQ9Ik0wIDBIMTQ4LjNWMTYxLjJMNjguNyAyNjIuOUgwWk0zMjcgMEg1MjcuMVYxMjguNkg0MzAuMkwxOTIuNSA0MzIuNkgwVjMwNEg4OS4zWk0zOTkuNiAyNDMuMkg1MjcuMVYzMTEuOEw0MzIuNiA0MzIuNkgzMDUuMVYzNjQuMVoiLz48L3N2Zz4=">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500;600;700&family=Space+Mono:wght@400;700&family=Fira+Code:wght@400;500;700&family=Martian+Mono:wght@400;500;700&display=swap" rel="stylesheet">
@@ -56,6 +56,8 @@
 /* ============================ constants ============================ */
 const KEY="tasks.store.v1", SET_KEY="otk.settings.v1";
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,7);
+/* app logo (3 shapes, 527.1 × 432.6 box) — same geometry as the favicon and icon-*.png */
+const LOGO_D='M0 0H148.3V161.2L68.7 262.9H0ZM327 0H527.1V128.6H430.2L192.5 432.6H0V304H89.3ZM399.6 243.2H527.1V311.8L432.6 432.6H305.1V364.1Z';
 
 const BASES={
   Charcoal:{bg:'#100f0d',bg2:'#141210',surface:'#1a1710',surface2:'#151309',line:'#2b261d',lineSoft:'#201c14',lineStrong:'#322a1c',text:'#ece6d8',text2:'#d5ccb8',dim:'#a89e88',dim2:'#8a8172',faint:'#6e6554'},
@@ -994,7 +996,7 @@ function renderDesktop(){
     +'<span style="font-size:10px;flex:none;color:'+(active?'var(--accent)':'var(--faint)')+';">'+cnt+'</span></div>';});
   const header='<header class="otk-topbar" style="position:relative;display:flex;align-items:center;gap:13px;height:46px;padding:0 14px;border-bottom:1px solid var(--line);flex:none;">'
     +'<button data-act="toggleDeskNav" title="Projects panel" style="display:flex;align-items:center;justify-content:center;width:30px;height:30px;flex:none;border:1px solid transparent;border-radius:var(--r2);background:transparent;color:var(--dim2);cursor:pointer;">'+icon('menu',18)+'</button>'
-    +'<span style="display:flex;align-items:center;gap:8px;flex:none;color:var(--text);"><svg width="18" height="18" viewBox="0 0 100 100" shape-rendering="crispEdges" style="display:block;flex:none;"><rect x="22" y="20" width="33" height="12" fill="currentColor"/><rect x="22" y="44" width="33" height="12" fill="currentColor"/><rect x="34" y="68" width="33" height="12" fill="currentColor"/><rect x="62" y="20" width="12" height="12" fill="#63d68a"/></svg><span style="font-size:12.5px;font-weight:700;letter-spacing:.16em;font-family:\'IBM Plex Mono\',ui-monospace,monospace;">OPENTASKS</span></span>'
+    +'<span style="display:flex;align-items:center;gap:8px;flex:none;color:var(--text);"><svg width="19" height="15.6" viewBox="0 0 527.1 432.6" aria-hidden="true" style="display:block;flex:none;"><path fill="currentColor" d="'+LOGO_D+'"/></svg><span style="font-size:12.5px;font-weight:700;letter-spacing:.16em;font-family:\'IBM Plex Mono\',ui-monospace,monospace;">OPENTASKS</span></span>'
     +sectionToggleHTML()
     +(view.section==='tasks'?('<span class="otk-sep" style="width:1px;height:18px;background:var(--line);flex:none;"></span><span class="otk-stats" style="font-size:10.5px;letter-spacing:.06em;color:var(--faint);text-transform:uppercase;white-space:nowrap;">P'+gProj+' · T'+gTasks+' · ○'+gOpen+'</span>'):'')
     +'<span style="flex:1"></span>'
