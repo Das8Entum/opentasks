@@ -64,12 +64,14 @@ That's the whole app. The sections below are the optional layers.
 
 Your tasks are stored as a single JSON file in a **private gist**; every device reads/writes that gist.
 
-1. Create a **personal access token (classic)** at <https://github.com/settings/tokens> with **only** the `gist` scope. Copy it.
+1. Create a **personal access token (classic)** at <https://github.com/settings/tokens> with **only** the `gist` scope. Pick a long expiration (or *No expiration*): when the token expires, sync stops. Copy it.
 2. Create a new **secret** gist at <https://gist.github.com> with a file named `tasks.json` containing `{}`. After saving, copy the **gist ID** from its URL (`https://gist.github.com/<user>/<THIS_ID>`).
 3. In OpenTasks: menu → **Sync** → paste the **token** and **gist ID** → **Connect**.
 4. Repeat step 3 on each device (same token + gist ID). Changes auto-push (debounced) and auto-pull.
 
 > The token is stored only in that device's localStorage — never in the file, never in the gist.
+
+**Token expired?** The Sync window says *GitHub rejected the token (expired or revoked)*. Nothing is lost: every device keeps working offline. Create a new token (or *Regenerate* the old one on GitHub), then paste it in **Sync → Reconnect** on each device, in any order — the edits each device made meanwhile are merged, not overwritten.
 
 ### 2. Vault — end-to-end encryption
 
@@ -119,7 +121,7 @@ Files are encrypted **in your browser** before upload; the backend only relays c
 ## How it works
 
 - **One IIFE** in `index.html`. State is a plain object; `render()` rebuilds `#app` from `renderDesktop()`/`renderMobile()`; clicks are handled by delegated `data-act` attributes.
-- **Sync**: debounced `PATCH` to the gist; auto-pull on load and on a timer (paused while editing). Backward-compatible data migration on load.
+- **Sync**: a 3-way merge, never a blind overwrite. Each device keeps the version it last agreed on with the gist (the *base*); every sync re-reads the gist (conditional `ETag` request, so an unchanged gist costs a 304) and merges each project, tag and task field by field — changed on one side → that side wins, changed on both → the most recent edit wins, deleted on one side and untouched on the other → deleted. Offline edits, expired tokens and two devices editing at once therefore lose nothing. Edits are pushed after a short debounce; auto-pull on load and on a timer (paused while editing). Backward-compatible data migration on load.
 - **Crypto**: Web Crypto only (`crypto.subtle`). Encrypted envelope `{enc, salt, iv, ct}`; the salt travels in the envelope and is adopted on pull.
 - **Locker**: files are chunked (4 MB), each chunk AES-GCM-encrypted (12-byte IV prepended) and `PUT` to the Worker at `/o/<key>`; reassembled and decrypted on open. Near-real-time is a 5 s index poll while the Locker is open. The encrypted index (files, folders, tombstones for deletions) is **merged** on every pull and push — newest edit wins per item — so two devices working at the same time never erase each other's changes.
 - **Share target** (`sw.js`): a minimal service worker that only intercepts the Android share POST, parks the files in IndexedDB and reopens the app to upload them. It caches nothing, so app updates are never stuck behind a stale cache.

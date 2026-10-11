@@ -238,31 +238,118 @@ function b64e(buf){const b=new Uint8Array(buf);let s="";const CH=0x8000;for(let 
 function b64d(s){return Uint8Array.from(atob(s),c=>c.charCodeAt(0));}
 async function deriveKey(salt){const base=await crypto.subtle.importKey("raw",new TextEncoder().encode(encPass()),"PBKDF2",false,["deriveKey"]);return crypto.subtle.deriveKey({name:"PBKDF2",salt,iterations:200000,hash:"SHA-256"},base,{name:"AES-GCM",length:256},false,["encrypt","decrypt"]);}
 async function getKey(saltB64){let sB=saltB64||encSalt;if(!sB)sB=b64e(crypto.getRandomValues(new Uint8Array(16)));if(cryptoKey&&sB===encSalt)return cryptoKey;encSalt=sB;localStorage.setItem(ENC_SALT,encSalt);cryptoKey=await deriveKey(b64d(encSalt));return cryptoKey;}
-async function encPayload(){const key=await getKey();const iv=crypto.getRandomValues(new Uint8Array(12));const ct=await crypto.subtle.encrypt({name:"AES-GCM",iv},key,new TextEncoder().encode(JSON.stringify(store)));return JSON.stringify({enc:"v1",salt:encSalt,iv:b64e(iv),ct:b64e(ct)});}
+async function encPayload(obj){const key=await getKey();const iv=crypto.getRandomValues(new Uint8Array(12));const ct=await crypto.subtle.encrypt({name:"AES-GCM",iv},key,new TextEncoder().encode(JSON.stringify(obj||store)));return JSON.stringify({enc:"v1",salt:encSalt,iv:b64e(iv),ct:b64e(ct)});}
 async function decPayload(env){const key=await getKey(env.salt);const pt=await crypto.subtle.decrypt({name:"AES-GCM",iv:b64d(env.iv)},key,b64d(env.ct));return JSON.parse(new TextDecoder().decode(pt));}
 function setCloud(s){cloudState=s;refreshSyncDot();}
 function refreshSyncDot(){
   document.querySelectorAll('.otk-syncdot').forEach(d=>{const on=cloudOn()&&(cloudState==='synced'||cloudState==='syncing');d.style.background=cloudState==='error'?'#e0705a':(on?'var(--accent2)':'var(--faint)');d.style.animation=(on&&cloudState==='synced')?'pulse 2.4s infinite':'none';d.style.boxShadow=(on)?'0 0 6px var(--accent2)':'none';});
   document.querySelectorAll('.otk-synclabel').forEach(l=>{l.textContent=cloudState==='syncing'?'Sync…':(cloudOn()?'Gist':'Sync');});
 }
-async function cloudPull(){
-  if(!cloudOn())return false;setCloud('syncing');
-  try{const r=await fetch("https://api.github.com/gists/"+cloud.id,{headers:ghHeaders()});if(!r.ok)throw new Error("HTTP "+r.status);
-    const g=await r.json();const f=g.files&&g.files[GFILE];
-    if(f){let content=f.content;if(f.truncated&&f.raw_url)content=await(await fetch(f.raw_url)).text();
-      const parsed=JSON.parse(content);let data;
-      if(parsed&&parsed.enc){if(!encOn()){cloud.err="This gist is encrypted — enter the passphrase.";setCloud('error');return false;}lastPullEncrypted=true;data=await decPayload(parsed);}
-      else{lastPullEncrypted=false;data=parsed;}
-      if(data&&Array.isArray(data.projects)){store=migrate(data);persistLocal();fixActive();render();}}
-    cloud.err="";setCloud('synced');return true;
-  }catch(e){cloud.err=e.name==="OperationError"?"Wrong passphrase.":"";setCloud(navigator.onLine?'error':'offline');return false;}
-}
-async function cloudPush(){
-  if(!cloudOn())return false;setCloud('syncing');
-  try{const content=encOn()?await encPayload():JSON.stringify(store,null,2);const body={files:{}};body.files[GFILE]={content};
-    const r=await fetch("https://api.github.com/gists/"+cloud.id,{method:"PATCH",headers:ghHeaders(true),body:JSON.stringify(body)});if(!r.ok)throw new Error("HTTP "+r.status);setCloud('synced');return true;
-  }catch(e){setCloud(navigator.onLine?'error':'offline');return false;}
-}
+/* ---- tasks sync = 3-way merge ----
+   The gist copy is never applied over edits that have not reached it yet (offline, expired token, two
+   devices editing at once). Each device keeps the BASE = the version it last agreed on with the gist; every
+   sync re-reads the gist and merges each project / tag / task on its own: changed on one side → that side
+   wins, changed on both → the side edited last wins, deleted on one side and untouched on the other → gone.
+   Pull and push are the same operation (read, merge, write back only if needed), serialized. */
+const BASE_KEY="tasks.gist.base", SYNC_V=2, APP_BUILD="2026-10-11";
+let _ghEtag="", _ghLast=null, _syncQ=Promise.resolve(), _renderPending=false;
+function canon(v){if(v===null||typeof v!=='object')return JSON.stringify(v);if(Array.isArray(v))return '['+v.map(x=>x===undefined?'null':canon(x)).join(',')+']';return '{'+Object.keys(v).filter(k=>v[k]!==undefined).sort().map(k=>JSON.stringify(k)+':'+canon(v[k])).join(',')+'}';}
+const canonData=s=>canon([s.projects,s.tags,s.tasks]);
+function loadBase(){try{const r=localStorage.getItem(BASE_KEY);return r?migrate(JSON.parse(r)):null;}catch(e){return null;}}
+function saveBase(s){try{localStorage.setItem(BASE_KEY,JSON.stringify(s));}catch(e){}}
+function clearBase(){try{localStorage.removeItem(BASE_KEY);}catch(e){}_ghEtag="";_ghLast=null;}
+function ghFail(r){const e=new Error("HTTP "+r.status);e.status=r.status;e.rl=r.headers.get('X-RateLimit-Remaining');return e;}
+function syncErrText(e){
+  if(e&&e.name==="OperationError")return "Wrong passphrase.";
+  if(e&&e.needPass)return "This gist is encrypted — enter the passphrase.";
+  const s=e&&e.status;
+  if(s===401)return "GitHub rejected the token (expired or revoked). Create a new one and paste it here — nothing is lost meanwhile.";
+  if(s===403)return e.rl==='0'?"GitHub rate limit reached — sync resumes within the hour.":"GitHub refused access — the token needs the gist scope.";
+  if(s===404)return "Gist not found — check the Gist ID, or the token cannot see this gist.";
+  if(s)return "GitHub error "+s+" — try again later.";
+  return navigator.onLine?"Network error — sync will retry.":"Offline — changes stay on this device and sync later.";}
+async function ghFileText(f){if(f.truncated&&f.raw_url)return await(await fetch(f.raw_url,{cache:"no-store"})).text();return f.content;}
+async function readTasks(txt){const p=JSON.parse(txt);
+  if(p&&p.enc){if(!encOn()){const e=new Error("passphrase needed");e.needPass=true;throw e;}return {data:migrate(await decPayload(p)),enc:true};}
+  return {data:(p&&Array.isArray(p.projects))?migrate(p):null,enc:false};}
+/* conditional GET (ETag): an unchanged gist costs a 304, no body */
+async function ghGetGist(){
+  const h=ghHeaders();if(_ghEtag&&_ghLast)h["If-None-Match"]=_ghEtag;
+  const r=await fetch("https://api.github.com/gists/"+cloud.id,{headers:h,cache:"no-store"});
+  if(r.status===304&&_ghLast)return _ghLast;
+  if(!r.ok)throw ghFail(r);
+  const g=await r.json(),f=g.files&&g.files[GFILE];let t={data:null,enc:false},txt="";
+  if(f){txt=await ghFileText(f);t=await readTasks(txt);}
+  _ghEtag=r.headers.get('ETag')||"";_ghLast={data:t.data,enc:t.enc,env:txt,history:g.history||[]};return _ghLast;}
+function entityMap(s){const m=new Map();if(!s)return m;[['p',s.projects],['g',s.tags],['t',s.tasks]].forEach(([k,l])=>(l||[]).forEach(o=>{if(o&&o.id)m.set(k+o.id,canon(o));}));return m;}
+/* first sync on a device that predates the merge engine (no base stored): among recent gist revisions written
+   by older versions, take the one this device's copy agrees with most = the last version it actually saw */
+async function legacyBase(rem,local){
+  const L=entityMap(local);if(!L.size)return null;
+  let best=null,bestScore=0,since=0;const seen=new Set();
+  const consider=(d,txt)=>{seen.add(txt);if(!d||(d.sv||0)>=SYNC_V)return;let s=0;entityMap(d).forEach((v,k)=>{if(L.get(k)===v)s++;});if(s>bestScore){best=d;bestScore=s;since=0;}else since++;};
+  consider(rem.data,rem.env);
+  const hist=(rem.history||[]).slice(1,60);
+  for(let i=0;i<hist.length&&since<12;i+=6){
+    const batch=await Promise.all(hist.slice(i,i+6).map(h=>fetch("https://api.github.com/gists/"+cloud.id+"/"+h.version,{headers:ghHeaders(),cache:"no-store"}).then(r=>r.ok?r.json():null).catch(()=>null)));
+    for(const g of batch){const f=g&&g.files&&g.files[GFILE];if(!f)continue;
+      try{const txt=await ghFileText(f);if(seen.has(txt))continue;consider((await readTasks(txt)).data,txt);}catch(e){}}
+  }
+  return best;}
+/* both sides changed the same item: merge it field by field (title here, done there → both kept) */
+function mergeEntity(b,l,r,localWins){
+  if(!b)return localWins?l:r;
+  const out={};new Set(Object.keys(l).concat(Object.keys(r))).forEach(k=>{const cb=canon(b[k]),cl=canon(l[k]),cr=canon(r[k]);
+    const v=(cl===cr||cr===cb)?l[k]:(cl===cb)?r[k]:(localWins?l[k]:r[k]);if(v!==undefined)out[k]=v;});
+  return out;}
+function mergeList(bl,ll,rl,localWins,keepAll){
+  const B=new Map((bl||[]).map(o=>[o.id,o])),L=new Map((ll||[]).map(o=>[o.id,o])),R=new Map((rl||[]).map(o=>[o.id,o]));
+  const pick=id=>{const b=B.has(id)?canon(B.get(id)):null,l=L.get(id),r=R.get(id),cl=l?canon(l):null,cr=r?canon(r):null;
+    if(l&&r){if(cl===cr||cr===b)return l;if(cl===b)return r;return mergeEntity(B.get(id),l,r,localWins);}
+    if(l)return (!keepAll&&b!==null&&cl===b)?null:l;   // deleted remotely and untouched here → gone; edited here → kept
+    if(r)return (!keepAll&&b!==null&&cr===b)?null:r;   // deleted here and untouched remotely → gone
+    return null;};
+  // gist order first, then what only this device has: devices converge instead of re-writing each other's order
+  const out=[],seen=new Set();
+  [rl||[],ll||[]].forEach(list=>list.forEach(o=>{if(!o||!o.id||seen.has(o.id))return;seen.add(o.id);const v=pick(o.id);if(v)out.push(v);}));
+  return out;}
+function merge3(base,local,remote,keepAll){
+  const lw=(+local.updatedAt||0)>=(+remote.updatedAt||0),m=Object.assign({},remote,local);
+  ['projects','tags','tasks'].forEach(k=>{m[k]=mergeList(base&&base[k],local[k],remote[k],lw,keepAll);});
+  // a task never loses its project (project deleted on one side while the other side still uses it)
+  const pid=new Set(m.projects.map(p=>p.id));
+  m.tasks.forEach(t=>{if(pid.has(t.projectId))return;const p=[local,remote,base].map(s=>s&&(s.projects||[]).find(x=>x.id===t.projectId)).find(Boolean);if(p){m.projects.push(p);pid.add(p.id);}});
+  m.updatedAt=Math.max(+local.updatedAt||0,+remote.updatedAt||0);m.sv=SYNC_V;
+  return JSON.parse(JSON.stringify(m));}
+/* re-render after a merge, but never under the user's fingers (typing in a field) */
+function renderSoon(){const a=document.activeElement,t=a&&a.tagName;if(t==='TEXTAREA'||(t==='INPUT'&&a.type!=='range'&&a.type!=='file')){_renderPending=true;return;}render();}
+function syncTasks(){
+  const run=async()=>{
+    if(!cloudOn())return false;setCloud('syncing');
+    try{
+      const rem=await ghGetGist();let base=loadBase(),legacy=false;
+      if(!base&&rem.data){legacy=true;base=await legacyBase(rem,store);}
+      // from here on synchronous: whatever was typed meanwhile is already in `store`
+      const before=canonData(store);
+      // a first merge on an old device never deletes (a guessed base must not cost data)
+      const merged=rem.data?merge3(base,store,rem.data,legacy):JSON.parse(JSON.stringify(Object.assign({},store,{sv:SYNC_V})));
+      const localChanged=canonData(merged)!==before;
+      const write=!rem.data||canonData(merged)!==canonData(rem.data)||rem.enc!==encOn();
+      store=merged;persistLocal();fixActive();lastPullEncrypted=rem.enc;
+      if(localChanged)renderSoon();
+      if(write){const snap=JSON.parse(JSON.stringify(store));
+        const content=encOn()?await encPayload(snap):JSON.stringify(snap,null,2);
+        const r=await fetch("https://api.github.com/gists/"+cloud.id,{method:"PATCH",headers:ghHeaders(true),body:JSON.stringify({files:{[GFILE]:{content}}}),cache:"no-store"});
+        if(!r.ok)throw ghFail(r);
+        let hist=[];try{hist=(await r.json()).history||[];}catch(e){}
+        _ghEtag="";_ghLast={data:snap,enc:encOn(),env:content,history:hist};saveBase(snap);
+      }else saveBase(store);
+      if(legacy&&localChanged&&rem.data)toast('Synced — changes from this device and the gist were merged');
+      cloud.err="";setCloud('synced');return true;
+    }catch(e){cloud.err=syncErrText(e);setCloud(e&&e.status?'error':(navigator.onLine?'error':'offline'));return false;}
+  };
+  const p=_syncQ.then(run,run);_syncQ=p.catch(()=>{});return p;}
+const cloudPull=syncTasks, cloudPush=syncTasks;
 function schedulePush(){if(!cloudOn())return;clearTimeout(pushTimer);pushTimer=setTimeout(()=>{pushTimer=null;cloudPush();},900);}
 async function cloudCreate(){const content=encOn()?await encPayload():JSON.stringify(store,null,2);const body={description:"OpenTasks — sync",public:false,files:{}};body.files[GFILE]={content};const r=await fetch("https://api.github.com/gists",{method:"POST",headers:ghHeaders(true),body:JSON.stringify(body)});if(!r.ok)throw new Error("HTTP "+r.status);const g=await r.json();return g.id;}
 
@@ -797,14 +884,14 @@ async function syncConnect(){
   if(locker.token)localStorage.setItem(LK_TOKEN,locker.token);else localStorage.removeItem(LK_TOKEN);
   lockerLoaded=false;
   try{
-    if(gid){cloud.id=gid;localStorage.setItem(CFG_ID,gid);if(st)st.textContent="Connecting…";const ok=await cloudPull();
+    // same gist = keep the merge base (a new token never costs local edits); another gist = start over
+    if(gid){if(gid!==cloud.id)clearBase();_ghEtag="";_ghLast=null;cloud.id=gid;localStorage.setItem(CFG_ID,gid);if(st)st.textContent="Connecting…";const ok=await cloudPull();
       if(!ok){if(st){st.textContent=cloud.err||"Failed — check token / ID.";st.style.color="#e0705a";}return;}
-      if(encOn()&&!lastPullEncrypted)await cloudPush();
-    }else{if(st)st.textContent="Creating gist…";const nid=await cloudCreate();cloud.id=nid;localStorage.setItem(CFG_ID,nid);}
+    }else{if(st)st.textContent="Creating gist…";const nid=await cloudCreate();clearBase();cloud.id=nid;localStorage.setItem(CFG_ID,nid);saveBase(store);}
     syncOpen=false;render();
   }catch(e){if(st){st.textContent="Error: "+e.message;st.style.color="#e0705a";}setCloud('error');}
 }
-function syncDisconnect(){cloud.token="";cloud.id="";cloud.err="";localStorage.removeItem(CFG_TOKEN);localStorage.removeItem(CFG_ID);localStorage.removeItem(ENC_PASS);localStorage.removeItem(ENC_SALT);cryptoKey=null;encSalt="";setCloud('off');render();}
+function syncDisconnect(){clearBase();cloud.token="";cloud.id="";cloud.err="";localStorage.removeItem(CFG_TOKEN);localStorage.removeItem(CFG_ID);localStorage.removeItem(ENC_PASS);localStorage.removeItem(ENC_SALT);cryptoKey=null;encSalt="";setCloud('off');render();}
 
 /* ============================ theme ============================ */
 function applyTheme(){
@@ -1091,7 +1178,7 @@ function modalsHTML(){
     +'<p style="margin:0 0 13px;font-size:10px;line-height:1.6;color:var(--faint);">If set, your notes are encrypted (AES-256) before upload. Same passphrase on every device. Lost = unrecoverable.</p>'
     +'<div style="border-top:1px solid var(--line-soft);margin:2px 0 13px;padding-top:13px;"><label style="display:block;font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--faint);margin-bottom:5px;">Locker — Worker URL (media, optional)</label><input id="otk-lkurl" value="'+esc(locker.url)+'" placeholder="https://….workers.dev" style="width:100%;margin-bottom:10px;background:var(--bg);border:1px solid var(--line);border-radius:var(--r2);padding:9px 11px;font-family:inherit;font-size:12.5px;color:var(--text);outline:none;" /><label style="display:block;font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--faint);margin-bottom:5px;">Locker token</label><input id="otk-lktoken" type="password" value="'+esc(locker.token)+'" placeholder="LOCKER_TOKEN" style="width:100%;background:var(--bg);border:1px solid var(--line);border-radius:var(--r2);padding:9px 11px;font-family:inherit;font-size:12.5px;color:var(--text);outline:none;" /></div>'
     +'<div id="otk-syncstatus" style="font-size:10.5px;letter-spacing:.04em;color:var(--dim2);margin-bottom:12px;min-height:14px;">'+(cloud.err?esc(cloud.err):(connected?'Connected · Gist '+esc(cloud.id.slice(0,10))+(encOn()?' · encrypted':''):'Not connected'))+'</div>'
-    +'<div style="display:flex;align-items:center;gap:8px;"><span style="flex:1"></span>'+(connected?'<button data-act="syncDisconnect" style="padding:8px 13px;border:1px solid var(--line-strong);border-radius:var(--r2);background:transparent;color:var(--dim);font-family:inherit;font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;cursor:pointer;">Disconnect</button>':'')+'<button data-act="syncConnect" style="padding:8px 16px;border:none;border-radius:var(--r2);background:var(--accent);color:var(--on-accent);font-family:inherit;font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;cursor:pointer;">'+(connected?'Reconnect':'Connect')+'</button></div></div></div>';}
+    +'<div style="display:flex;align-items:center;gap:8px;"><span title="App version — the same on every device means the same sync engine" style="flex:1;font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--faint);">Build '+APP_BUILD+'</span>'+(connected?'<button data-act="syncDisconnect" style="padding:8px 13px;border:1px solid var(--line-strong);border-radius:var(--r2);background:transparent;color:var(--dim);font-family:inherit;font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;cursor:pointer;">Disconnect</button>':'')+'<button data-act="syncConnect" style="padding:8px 16px;border:none;border-radius:var(--r2);background:var(--accent);color:var(--on-accent);font-family:inherit;font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;cursor:pointer;">'+(connected?'Reconnect':'Connect')+'</button></div></div></div>';}
   if(settingsOpen)h+=settingsHTML();
   h+=lockerViewerHTML();
   return h;
@@ -1115,7 +1202,7 @@ function settingsHTML(){
 /* ============================ render + wiring ============================ */
 const MOBILE_Q=window.matchMedia('(max-width:640px)');
 function isMobile(){return MOBILE_Q.matches;}
-function render(){saveNav();const _sl=document.querySelector('[data-scroll]');const _st=_sl?_sl.scrollTop:0;applyTheme();document.getElementById('app').innerHTML=(isMobile()?renderMobile():renderDesktop())+modalsHTML();attachInputs(document);refreshSyncDot();const _nl=document.querySelector('[data-scroll]');if(_nl&&_st)_nl.scrollTop=_st;}
+function render(){_renderPending=false;saveNav();const _sl=document.querySelector('[data-scroll]');const _st=_sl?_sl.scrollTop:0;applyTheme();document.getElementById('app').innerHTML=(isMobile()?renderMobile():renderDesktop())+modalsHTML();attachInputs(document);refreshSyncDot();const _nl=document.querySelector('[data-scroll]');if(_nl&&_st)_nl.scrollTop=_st;}
 function refreshList(){const el=document.getElementById('otk-list');if(!el)return;el.innerHTML=isMobile()?tileListHTML():listInnerHTML();attachInputs(el);}
 function attachInputs(scope){
   scope.querySelectorAll('.otk-title').forEach(el=>{const gr=()=>{el.style.height='auto';el.style.height=el.scrollHeight+'px';};el.addEventListener('input',()=>{setTitle(el.dataset.id,el.value);gr();});el.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key==='Escape'){e.preventDefault();view.titleEdit=null;render();}});el.addEventListener('blur',()=>{const id=el.dataset.id;setTimeout(()=>{if(view.titleEdit===id){view.titleEdit=null;render();}},0);});gr();});
@@ -1250,6 +1337,8 @@ function canAutoPull(){if(!cloudOn()||pushTimer||!navigator.onLine)return false;
 setInterval(()=>{if(canAutoPull())cloudPull();},45000);
 setInterval(()=>{if(view.section==='locker'&&lockerReady()&&!Object.keys(lkUploads).length&&!view.lkLightbox&&!promptS.open){const b=lkSig();lockerPull().then(()=>{if(lkSig()!==b)lkRefresh();lockerPrefetch();});}},5000);
 window.addEventListener('online',()=>{if(cloudOn())cloudPull();});
+// a merge that arrived while typing is shown once the field is left
+document.addEventListener('focusout',()=>{if(!_renderPending)return;setTimeout(()=>{if(!_renderPending)return;const a=document.activeElement,t=a&&a.tagName;if(t==='TEXTAREA'||t==='INPUT')return;_renderPending=false;render();},0);});
 })();
 </script>
 </body>
