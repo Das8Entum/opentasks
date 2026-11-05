@@ -41,6 +41,13 @@
   @media(hover:hover){.otk-lkrow:hover .otk-hov{visibility:visible}.otk-lkrow:hover .otk-pick .otk-kic{display:none!important}.otk-lkrow:hover .otk-pick .otk-cb{display:flex}.otk-hov:hover{background:rgba(224,90,70,.14)!important}}
   @media(hover:none){.otk-hov{display:none!important}}
   .otk-lkhead{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+  /* timesheet cells */
+  .otk-tsin{width:100%;min-width:0;height:30px;padding:0 6px;border:1px solid var(--line-soft);border-radius:var(--r2);background:var(--bg);color:var(--text);font-family:inherit;font-size:12.5px;text-align:center;font-variant-numeric:tabular-nums;outline:none;transition:border-color .12s,background .12s}
+  .otk-tsin::placeholder{color:var(--faint);opacity:.55;font-size:10.5px;letter-spacing:.06em;text-transform:uppercase}
+  .otk-tsday:hover .otk-tsin{border-color:var(--line)}
+  .otk-tsin:focus{border-color:var(--accent-line)!important;background:var(--surface)}
+  .otk-tsin.bad{border-color:#e0705a!important;color:#e0806a}
+  @media(max-width:640px){.otk-tsin{height:34px;font-size:13.5px}}
   @media (display-mode: window-controls-overlay){
     .otk-topbar{-webkit-app-region:drag;padding-left:max(14px,env(titlebar-area-x,14px)) !important;padding-right:max(14px,calc(100vw - env(titlebar-area-x,0px) - env(titlebar-area-width,100vw))) !important}
     .otk-topbar button,.otk-topbar input,.otk-topbar [data-act]{-webkit-app-region:no-drag}
@@ -179,10 +186,10 @@ let settings=loadSettings();
 
 /* ============================ state ============================ */
 let store=load();
-let view={projectId:null,tags:[],search:'',composerIcon:'sine',expanded:{},drawer:false,searchOpen:false,tagsOpen:false,editorTagsOpen:{},titleEdit:null,deskNav:true,section:'tasks',lkExpanded:{},lkFilter:'ALL',lkSort:'recent',lkFilterOpen:false,lkSearch:'',lkAttachOpen:null,lkLightbox:null,lkFolder:(()=>{try{return localStorage.getItem('otk.lkfolder')||null;}catch(e){return null;}})(),lkFolderMenu:null,lkMove:null,lkSel:{}};
+let view={projectId:null,tags:[],search:'',composerIcon:'sine',expanded:{},drawer:false,searchOpen:false,tagsOpen:false,editorTagsOpen:{},titleEdit:null,deskNav:true,section:'tasks',lkExpanded:{},lkFilter:'ALL',lkSort:'recent',lkFilterOpen:false,lkSearch:'',lkAttachOpen:null,lkLightbox:null,lkFolder:(()=>{try{return localStorage.getItem('otk.lkfolder')||null;}catch(e){return null;}})(),lkFolderMenu:null,lkMove:null,lkSel:{},tsCfgOpen:false};
 /* where you were (section, project, desktop side panel) survives a reload */
 const NAV_KEY="otk.nav";
-(()=>{try{const n=JSON.parse(localStorage.getItem(NAV_KEY)||'null');if(n&&typeof n==='object'){if(n.section==='tasks'||n.section==='locker')view.section=n.section;if(typeof n.projectId==='string')view.projectId=n.projectId;if(typeof n.deskNav==='boolean')view.deskNav=n.deskNav;}}catch(e){}})();
+(()=>{try{const n=JSON.parse(localStorage.getItem(NAV_KEY)||'null');if(n&&typeof n==='object'){if(n.section==='tasks'||n.section==='locker'||n.section==='timesheet')view.section=n.section;if(typeof n.projectId==='string')view.projectId=n.projectId;if(typeof n.deskNav==='boolean')view.deskNav=n.deskNav;}}catch(e){}})();
 let _navSaved="";
 function saveNav(){const s=JSON.stringify({section:view.section,projectId:view.projectId,deskNav:view.deskNav});if(s===_navSaved)return;_navSaved=s;try{localStorage.setItem(NAV_KEY,s);}catch(e){}}
 let subDraft={};
@@ -251,7 +258,7 @@ function refreshSyncDot(){
    sync re-reads the gist and merges each project / tag / task on its own: changed on one side → that side
    wins, changed on both → the side edited last wins, deleted on one side and untouched on the other → gone.
    Pull and push are the same operation (read, merge, write back only if needed), serialized. */
-const BASE_KEY="tasks.gist.base", SYNC_V=2, APP_BUILD="2026-10-11";
+const BASE_KEY="tasks.gist.base", SYNC_V=2, APP_BUILD="2026-11-05";
 let _ghEtag="", _ghLast=null, _syncQ=Promise.resolve(), _renderPending=false;
 function canon(v){if(v===null||typeof v!=='object')return JSON.stringify(v);if(Array.isArray(v))return '['+v.map(x=>x===undefined?'null':canon(x)).join(',')+']';return '{'+Object.keys(v).filter(k=>v[k]!==undefined).sort().map(k=>JSON.stringify(k)+':'+canon(v[k])).join(',')+'}';}
 const canonData=s=>canon([s.projects,s.tags,s.tasks]);
@@ -280,7 +287,12 @@ async function ghGetGist(){
   if(!r.ok)throw ghFail(r);
   const g=await r.json(),f=g.files&&g.files[GFILE];let t={data:null,enc:false},txt="";
   if(f){txt=await ghFileText(f);t=await readTasks(txt);}
-  _ghEtag=r.headers.get('ETag')||"";_ghLast={data:t.data,enc:t.enc,env:txt,history:g.history||[]};return _ghLast;}
+  // the timesheet travels in its own file of the same gist (older app versions never touch it)
+  const ft=g.files&&g.files[TS_FILE];let tsr=null,tsEnc=false;
+  if(ft){try{const p=JSON.parse(await ghFileText(ft));if(p&&p.enc){if(!encOn()){const e=new Error("passphrase needed");e.needPass=true;throw e;}tsr=await decPayload(p);tsEnc=true;}else tsr=p;
+      if(tsr&&typeof tsr==='object')tsr={v:1,cfg:tsr.cfg||null,days:(tsr.days&&typeof tsr.days==='object')?tsr.days:{}};else tsr=null;}
+    catch(e){if(e&&(e.needPass||e.name==='OperationError'))throw e;tsr=null;}}
+  _ghEtag=r.headers.get('ETag')||"";_ghLast={data:t.data,enc:t.enc,env:txt,history:g.history||[],ts:tsr,tsEnc};return _ghLast;}
 function entityMap(s){const m=new Map();if(!s)return m;[['p',s.projects],['g',s.tags],['t',s.tasks]].forEach(([k,l])=>(l||[]).forEach(o=>{if(o&&o.id)m.set(k+o.id,canon(o));}));return m;}
 /* first sync on a device that predates the merge engine (no base stored): among recent gist revisions written
    by older versions, take the one this device's copy agrees with most = the last version it actually saw */
@@ -336,13 +348,19 @@ function syncTasks(){
       const localChanged=canonData(merged)!==before;
       const write=!rem.data||canonData(merged)!==canonData(rem.data)||rem.enc!==encOn();
       store=merged;persistLocal();fixActive();lastPullEncrypted=rem.enc;
-      if(localChanged)renderSoon();
-      if(write){const snap=JSON.parse(JSON.stringify(store));
-        const content=encOn()?await encPayload(snap):JSON.stringify(snap,null,2);
-        const r=await fetch("https://api.github.com/gists/"+cloud.id,{method:"PATCH",headers:ghHeaders(true),body:JSON.stringify({files:{[GFILE]:{content}}}),cache:"no-store"});
+      // timesheet: newest edit wins per day and for the settings
+      const tsMerged=tsMerge(ts,rem.ts),tsChanged=canon(tsMerged)!==canon(ts);
+      const tsWrite=tsHas(tsMerged)&&(canon(tsMerged)!==canon(rem.ts||null)||(!!rem.ts&&rem.tsEnc!==encOn()));
+      ts=tsMerged;saveTs();
+      if(localChanged||(tsChanged&&view.section==='timesheet'))renderSoon();
+      if(write||tsWrite){const files={};let snap=null;
+        if(write){snap=JSON.parse(JSON.stringify(store));files[GFILE]={content:encOn()?await encPayload(snap):JSON.stringify(snap,null,2)};}
+        else saveBase(store);   // tasks already equal to the gist: that is the base (saved before any await)
+        if(tsWrite){const tsSnap=JSON.parse(JSON.stringify(ts));files[TS_FILE]={content:encOn()?await encPayload(tsSnap):JSON.stringify(tsSnap,null,2)};}
+        const r=await fetch("https://api.github.com/gists/"+cloud.id,{method:"PATCH",headers:ghHeaders(true),body:JSON.stringify({files}),cache:"no-store"});
         if(!r.ok)throw ghFail(r);
-        let hist=[];try{hist=(await r.json()).history||[];}catch(e){}
-        _ghEtag="";_ghLast={data:snap,enc:encOn(),env:content,history:hist};saveBase(snap);
+        try{await r.json();}catch(e){}
+        _ghEtag="";_ghLast=null;if(write)saveBase(snap);
       }else saveBase(store);
       if(legacy&&localChanged&&rem.data)toast('Synced — changes from this device and the gist were merged');
       cloud.err="";setCloud('synced');return true;
@@ -605,6 +623,7 @@ function lkPressUp(){if(_lkPress&&_lkPress.fired)_lkPressEnd=Date.now();lkPressC
 function lkPressCancel(){const p=_lkPress;if(!p)return;_lkPress=null;clearTimeout(p.t);window.removeEventListener('pointermove',p.mv);window.removeEventListener('pointerup',lkPressUp);window.removeEventListener('pointercancel',lkPressUp);}
 function setSection(s){const same=view.section===s;if(s!=='locker'){lockerRevokeMedia();view.lkExpanded={};}view.section=s;view.drawer=false;view.lkLightbox=null;view.lkFilterOpen=false;view.lkAttachOpen=null;view.lkFolderMenu=null;view.lkMove=null;view.lkSel={};render();
   if(!same){const sc=document.querySelector('[data-scroll]');if(sc)sc.scrollTop=0;}
+  if(s==='timesheet'&&!same)tsScrollToday();
   if(s==='locker'){if(!lockerLoaded&&cloudOn()&&encOn())lockerPull().then(()=>{render();lockerPrefetch();});else lockerPrefetch();}}
 /* Tasks | Locker switch — text on desktop, icons only in the compact mobile header */
 function sectionToggleHTML(compact){const t=(s,l,ic)=>{const on=view.section===s;return '<button data-act="setSection" data-s="'+s+'" title="'+l+'" aria-label="'+l+'" aria-pressed="'+on+'" style="display:flex;align-items:center;justify-content:center;'+(compact?'width:36px;height:32px;padding:0;':'padding:5px 11px;')+'border:none;border-radius:var(--r3);cursor:pointer;font-family:inherit;font-size:10px;letter-spacing:.1em;text-transform:uppercase;background:'+(on?'var(--accent-soft)':'transparent')+';color:'+(on?'var(--accent)':'var(--dim2)')+';">'+(compact?icon(ic,17):l)+'</button>';};
@@ -869,6 +888,132 @@ function lockerViewerHTML(){
     +'<div data-act="stop" style="display:flex;align-items:center;justify-content:center;overflow:hidden;border:1px solid var(--line);border-radius:var(--r1);background:#0a0a0a;">'+inner+'</div></div>';
 }
 
+/* ============================ Timesheet ============================
+   One sheet = a client / site over a period: start, end, travel time and km per day, totals per week and
+   overall, revenue excl. VAT. Kept apart from the tasks (localStorage + timesheet.json in the same gist,
+   encrypted with the vault): each day and the settings carry `mt`, the newest edit wins on sync. */
+const TS_KEY="otk.timesheet", TS_FILE="timesheet.json";
+let ts=loadTs();
+function loadTs(){try{const r=JSON.parse(localStorage.getItem(TS_KEY)||'null');if(r&&typeof r==='object')return {v:1,cfg:r.cfg||null,days:(r.days&&typeof r.days==='object')?r.days:{}};}catch(e){}return {v:1,cfg:null,days:{}};}
+function saveTs(){try{localStorage.setItem(TS_KEY,JSON.stringify(ts));}catch(e){}}
+const tsHas=s=>!!(s&&(s.cfg||Object.keys(s.days||{}).length));
+function ymd(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
+function ymdDate(s){const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(s||'');return m?new Date(+m[1],+m[2]-1,+m[3]):null;}
+/* first opening: this month and the next one, 55 €/h, 0,44 €/km. mt 0 = any real edit, on any device, wins */
+function tsCfg(){if(!ts.cfg){const n=new Date();ts.cfg={name:'',from:ymd(new Date(n.getFullYear(),n.getMonth(),1)),to:ymd(new Date(n.getFullYear(),n.getMonth()+2,0)),rate:55,kmRate:0.44,billTravel:false,mt:0};saveTs();schedulePush();}return ts.cfg;}
+function isoWeek(d){const t=new Date(d.getFullYear(),d.getMonth(),d.getDate());t.setDate(t.getDate()-((t.getDay()+6)%7)+3);
+  const y=t.getFullYear(),w1=new Date(y,0,4);w1.setDate(w1.getDate()-((w1.getDay()+6)%7)+3);return {y,w:1+Math.round((t-w1)/(7*864e5))};}
+/* "8", "830", "0830", "8:30", "8h30" → minutes after midnight · '' → null · anything else → NaN */
+function tsClock(s){s=String(s==null?'':s).trim().toLowerCase().replace(/\s+/g,'');if(!s)return null;let h,m,x;
+  if((x=/^(\d{1,2})(?:[:h.](\d{0,2}))?$/.exec(s))){h=+x[1];m=x[2]?+x[2]:0;}else if(/^\d{3,4}$/.test(s)){h=+s.slice(0,-2);m=+s.slice(-2);}else return NaN;
+  if(h===24&&m===0)return 1440;return (h>23||m>59)?NaN:h*60+m;}
+/* travel: "45" = minutes · "1:30" / "1h30" / "1h" · "1,5" = decimal hours */
+function tsDur(s){s=String(s==null?'':s).trim().toLowerCase().replace(/\s+/g,'').replace(/(min|mn|m)$/,'');if(!s)return null;let x;
+  if(/^\d+$/.test(s))return +s;
+  if((x=/^(\d+)[:h](\d{0,2})$/.exec(s))){const m=x[2]?+x[2]:0;return m>59?NaN:(+x[1])*60+m;}
+  if((x=/^(\d*)[.,](\d+)$/.exec(s)))return Math.round(parseFloat((x[1]||'0')+'.'+x[2])*60);
+  return NaN;}
+function tsKm(s){s=String(s==null?'':s).replace(/\s|km$/gi,'').replace(',','.');if(!s)return null;return /^\d+(\.\d+)?$/.test(s)?+s:NaN;}
+function tsRate(s){const v=tsKm(s);return (v==null||Number.isNaN(v))?NaN:v;}
+function tsFmtClock(m){if(m==null||Number.isNaN(m))return '';if(m>=1440)return '24:00';return String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0');}
+function tsFmtDurIn(m){return (m==null||Number.isNaN(m))?'':Math.floor(m/60)+':'+String(m%60).padStart(2,'0');}
+function tsFmtHM(m){m=Math.round(m||0);const h=Math.floor(m/60),r=m%60;return r?h+' h '+String(r).padStart(2,'0'):h+' h';}
+const tsEUR=v=>(v||0).toLocaleString('fr-BE',{style:'currency',currency:'EUR'});
+const tsNum=(v,d)=>(v||0).toLocaleString('fr-BE',{maximumFractionDigits:d==null?1:d});
+const TS_PARSE={s:tsClock,e:tsClock,t:tsDur,k:tsKm}, TS_FMT={s:tsFmtClock,e:tsFmtClock,t:tsFmtDurIn,k:v=>v==null?'':tsNum(v,1)};
+function tsCalc(d,c){const s=d&&d.s,e=d&&d.e;let w=0;if(s!=null&&e!=null){w=e-s;if(w<0)w+=1440;}   // end before start = past midnight
+  const t=(d&&d.t)||0,k=(d&&d.k)||0;return {w,t,k,amt:w/60*c.rate+k*c.kmRate+(c.billTravel?t/60*c.rate:0),half:(s!=null)!==(e!=null)};}
+function tsModel(){const c=tsCfg(),a=ymdDate(c.from),b=ymdDate(c.to),weeks=[],tot={w:0,t:0,k:0,amt:0,days:0};
+  if(a&&b&&a<=b){let cur=null,n=0;for(const d=new Date(a);d<=b&&n<400;d.setDate(d.getDate()+1),n++){
+    const id=ymd(d),wk=isoWeek(d),key=wk.y+'-W'+wk.w;
+    if(!cur||cur.key!==key){cur={key,w:wk.w,days:[],tot:{w:0,t:0,k:0,amt:0}};weeks.push(cur);}
+    const e=ts.days[id]||null,x=tsCalc(e,c);cur.days.push({id,date:new Date(d),e,x});
+    ['w','t','k','amt'].forEach(f=>{cur.tot[f]+=x[f];tot[f]+=x[f];});if(x.w>0)tot.days++;}}
+  return {c,weeks,tot};}
+function tsSetDay(id,f,v){const d=Object.assign({},ts.days[id]||{});if((d[f]==null?null:d[f])===v)return;if(v==null)delete d[f];else d[f]=v;d.mt=Date.now();ts.days[id]=d;saveTs();schedulePush();}
+function tsSetCfg(k,v){const c=Object.assign({},tsCfg());c[k]=v;c.mt=Date.now();ts.cfg=c;saveTs();schedulePush();}
+function tsPick(x,y){if(!x)return y;if(!y)return x;const a=+x.mt||0,b=+y.mt||0;if(a!==b)return a>b?x:y;return canon(x)>=canon(y)?x:y;}
+function tsMerge(a,b){if(!b||!tsHas(b))return a;if(!tsHas(a))return JSON.parse(JSON.stringify({v:1,cfg:b.cfg||null,days:b.days||{}}));
+  const days={};new Set(Object.keys(a.days||{}).concat(Object.keys(b.days||{}))).forEach(k=>{days[k]=tsPick((a.days||{})[k],(b.days||{})[k]);});
+  return JSON.parse(JSON.stringify({v:1,cfg:tsPick(a.cfg,b.cfg),days}));}
+const tsDash=(v,f)=>v>0?f(v):'–';
+function tsDayLabel(d){return d.toLocaleDateString('en-GB',{weekday:'short'});}
+function tsRangeLabel(a,b){const o={day:'numeric',month:'short'},oy={day:'numeric',month:'short',year:'numeric'};return a.toLocaleDateString('en-GB',a.getFullYear()===b.getFullYear()?o:oy)+' – '+b.toLocaleDateString('en-GB',oy);}
+function tsStatsHTML(M,mobile){
+  const c=M.c,t=M.tot,workAmt=t.w/60*c.rate,kmAmt=t.k*c.kmRate,trAmt=c.billTravel?t.t/60*c.rate:0;
+  const card=(label,val,sub,big)=>'<div style="flex:'+(big?'1.7':'1')+' 1 0;min-width:0;padding:'+(mobile?'10px 11px':'12px 14px')+';border:1px solid var(--line);border-radius:var(--r1);background:var(--surface);">'
+    +'<div style="font-size:8.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--faint);margin-bottom:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+label+'</div>'
+    +'<div style="font-size:'+(big?(mobile?'22px':'24px'):(mobile?'15px':'18px'))+';font-weight:700;color:var(--text);font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+val+'</div>'
+    +'<div style="margin-top:5px;font-size:10px;line-height:1.35;color:var(--dim2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+sub+'</div></div>';
+  const rev=card('Revenue excl. VAT',tsEUR(workAmt+kmAmt+trAmt),tsNum(t.w/60,2)+' h × '+tsEUR(c.rate)+' + '+tsNum(t.k,1)+' km × '+tsEUR(c.kmRate)+(c.billTravel&&t.t?' + travel':''),true);
+  const hours=card('Hours',tsFmtHM(t.w),t.days+' day'+(t.days===1?'':'s')+(mobile?'':' · '+tsEUR(workAmt)));
+  const travel=card('Travel',tsFmtHM(t.t),c.billTravel?(mobile?'billed':tsEUR(trAmt)+' billed'):'not billed');
+  const km=card('Distance',tsNum(t.k,1)+' km',tsEUR(kmAmt));
+  return mobile?'<div style="display:flex;flex-direction:column;gap:8px;">'+rev+'<div style="display:flex;gap:8px;">'+hours+travel+km+'</div></div>'
+    :'<div style="display:flex;gap:10px;">'+hours+travel+km+rev+'</div>';}
+const TS_COLS='display:grid;grid-template-columns:minmax(104px,1.25fr) repeat(4,minmax(62px,84px)) minmax(66px,.9fr) minmax(88px,1fr);gap:8px;align-items:center;';
+function tsInputHTML(dd,f){const v=dd.e&&dd.e[f]!=null?dd.e[f]:null;
+  const ph={s:'Start',e:'End',t:'Travel',k:'km'}[f],tip={s:'Start — 830, 8:30 or 8h30',e:'End — 1730 or 17:30',t:'Travel time — minutes (45), h:mm (1:30) or hours (1,5)',k:'Kilometres'}[f];
+  return '<input class="otk-tsin" data-day="'+dd.id+'" data-f="'+f+'" value="'+esc(TS_FMT[f](v))+'" placeholder="'+ph+'" title="'+tip+'" inputmode="'+(f==='k'||f==='t'?'decimal':'numeric')+'" autocomplete="off" spellcheck="false" />';}
+function tsWeekHTML(wk,c,mobile,today){
+  const first=wk.days[0].date,last=wk.days[wk.days.length-1].date,o={day:'numeric',month:'short'};
+  const range=first.getTime()===last.getTime()?first.toLocaleDateString('en-GB',o):(first.getMonth()===last.getMonth()?first.getDate()+' – '+last.toLocaleDateString('en-GB',o):first.toLocaleDateString('en-GB',o)+' – '+last.toLocaleDateString('en-GB',o));
+  const T=wk.tot,v=(k,txt,st)=>'<span data-tsv="'+k+':'+wk.key+'" style="'+(st||'')+'">'+txt+'</span>';
+  const num='font-variant-numeric:tabular-nums;white-space:nowrap;';
+  let head;
+  if(mobile)head='<div style="padding:10px 12px;background:var(--surface);border-bottom:1px solid var(--line);">'
+      +'<div style="display:flex;align-items:baseline;gap:8px;"><span style="font-size:10.5px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--text);">Week '+wk.w+'</span><span style="font-size:10.5px;color:var(--faint);">'+range+'</span><span style="flex:1"></span>'+v('wa',tsDash(T.amt,tsEUR),num+'font-size:12px;font-weight:700;color:var(--text);')+'</div>'
+      +'<div style="display:flex;gap:12px;margin-top:4px;font-size:10px;color:var(--dim2);">'+v('ww',tsDash(T.w,tsFmtHM),num)+'<span style="display:flex;gap:4px;">'+v('wt',tsDash(T.t,tsFmtHM),num)+'<span style="color:var(--faint);">travel</span></span>'+v('wk',T.k>0?tsNum(T.k,1)+' km':'–',num)+'</div></div>';
+  else head='<div style="'+TS_COLS+'padding:9px 12px;background:var(--surface);border-bottom:1px solid var(--line);font-size:11px;color:var(--dim);">'
+      +'<span style="display:flex;align-items:baseline;gap:8px;min-width:0;"><span style="font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--text);font-size:10.5px;">Week '+wk.w+'</span><span style="color:var(--faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+range+'</span></span>'
+      +'<span></span><span></span>'+v('wt',tsDash(T.t,tsFmtHM),num+'text-align:center;')+v('wk',T.k>0?tsNum(T.k,1)+' km':'–',num+'text-align:center;')
+      +v('ww',tsDash(T.w,tsFmtHM),num+'text-align:right;color:var(--text);font-weight:600;')+v('wa',tsDash(T.amt,tsEUR),num+'text-align:right;color:var(--text);font-weight:700;')+'</div>';
+  const rows=wk.days.map((dd,i)=>{const d=dd.date,we=d.getDay()===0||d.getDay()===6,isT=dd.id===today,x=dd.x;
+    const dayTxt='<span style="font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:'+(we?'var(--faint)':'var(--dim2)')+';width:30px;flex:none;">'+tsDayLabel(d)+'</span><span style="font-size:12.5px;font-weight:600;color:'+(we?'var(--dim2)':'var(--text)')+';white-space:nowrap;">'+d.toLocaleDateString('en-GB',{day:'2-digit',month:'short'})+'</span>'+(isT?'<span style="font-size:8.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--accent);">Today</span>':'');
+    const h='<span data-tsv="dh:'+dd.id+'" style="'+num+'text-align:right;color:var(--text2);font-size:12px;">'+(x.w>0?tsFmtHM(x.w):(x.half?'…':''))+'</span>';
+    const a='<span data-tsv="da:'+dd.id+'" style="'+num+'text-align:right;color:var(--dim);font-size:12px;">'+(x.amt>0?tsEUR(x.amt):'')+'</span>';
+    const rowSt='border-top:'+(i?'1px solid var(--line-soft)':'none')+';'+(isT?'background:var(--accent-dim);box-shadow:inset 2px 0 0 var(--accent);':(we?'background:var(--bg);':''));
+    if(mobile)return '<div class="otk-tsday" data-day="'+dd.id+'" style="padding:9px 12px 10px;'+rowSt+'"><div style="display:flex;align-items:baseline;gap:8px;margin-bottom:7px;">'+dayTxt+'<span style="flex:1"></span>'+h+a+'</div>'
+      +'<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;">'+['s','e','t','k'].map(f=>tsInputHTML(dd,f)).join('')+'</div></div>';
+    return '<div class="otk-tsday" data-day="'+dd.id+'" style="'+TS_COLS+'padding:5px 12px;'+rowSt+'"><span style="display:flex;align-items:baseline;gap:8px;min-width:0;">'+dayTxt+'</span>'+['s','e','t','k'].map(f=>tsInputHTML(dd,f)).join('')+h+a+'</div>';}).join('');
+  return '<section style="margin-bottom:12px;border:1px solid var(--line);border-radius:var(--r1);overflow:hidden;background:var(--bg2);">'+head+rows+'</section>';}
+function tsCfgHTML(c,mobile,pad){
+  const lab=t=>'<span style="font-size:8.5px;letter-spacing:.13em;text-transform:uppercase;color:var(--faint);">'+t+'</span>';
+  const inp='width:100%;min-width:0;height:32px;padding:0 9px;border:1px solid var(--line);border-radius:var(--r2);background:var(--bg);color:var(--text);font-family:inherit;font-size:12px;outline:none;';
+  const f=(label,html,span)=>'<label style="display:flex;flex-direction:column;gap:5px;min-width:0;'+(span?'grid-column:1/-1;':'')+'">'+lab(label)+html+'</label>';
+  const on=!!c.billTravel;
+  return '<div style="flex:none;margin:0 '+pad+' 14px;padding:14px;border:1px solid var(--line);border-radius:var(--r1);background:var(--surface2);display:grid;grid-template-columns:'+(mobile?'1fr 1fr':'1.6fr 1fr 1fr .8fr .8fr')+';gap:12px;align-items:end;">'
+    +f('Client / site','<input class="otk-tscfg" data-k="name" value="'+esc(c.name||'')+'" placeholder="Optional" style="'+inp+'" />',mobile)
+    +f('From','<input type="date" class="otk-tscfg" data-k="from" value="'+esc(c.from)+'" style="'+inp+'" />')
+    +f('To','<input type="date" class="otk-tscfg" data-k="to" value="'+esc(c.to)+'" style="'+inp+'" />')
+    +f('Rate · € / h','<input class="otk-tscfg" data-k="rate" inputmode="decimal" value="'+esc(tsNum(c.rate,2))+'" style="'+inp+'" />')
+    +f('Mileage · € / km','<input class="otk-tscfg" data-k="kmRate" inputmode="decimal" value="'+esc(tsNum(c.kmRate,4))+'" style="'+inp+'" />')
+    +'<button data-act="tsToggleTravel" style="grid-column:1/-1;justify-self:start;display:flex;align-items:center;gap:10px;padding:0;border:none;background:transparent;color:var(--dim);font-family:inherit;font-size:11.5px;cursor:pointer;">'
+      +'<span style="position:relative;width:30px;height:17px;flex:none;border-radius:9px;background:'+(on?'var(--accent)':'var(--line-strong)')+';transition:background .15s;"><span style="position:absolute;top:2px;left:'+(on?'15px':'2px')+';width:13px;height:13px;border-radius:50%;background:'+(on?'var(--on-accent)':'var(--dim)')+';transition:left .15s;"></span></span>'
+      +'Bill travel time at the hourly rate</button></div>';}
+function timesheetHTML(mobile){
+  const M=tsModel(),c=M.c,pad=mobile?'12px':'22px',today=ymd(new Date()),a=ymdDate(c.from),b=ymdDate(c.to);
+  const inPeriod=!!(a&&b&&today>=c.from&&today<=c.to);
+  const btn='display:flex;align-items:center;justify-content:center;gap:6px;flex:none;height:32px;border:1px solid var(--line);border-radius:var(--r2);background:var(--bg2);color:var(--text2);font-family:inherit;font-size:10.5px;letter-spacing:.07em;text-transform:uppercase;cursor:pointer;';
+  const title='<div style="display:flex;align-items:center;gap:10px;padding:'+(mobile?'2px':'16px')+' '+pad+' 12px;flex:none;">'
+    +(mobile?'':'<span style="display:flex;color:var(--text2);flex:none;">'+icon('stopwatch',18)+'</span><h1 style="margin:0;font-size:15px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--text);flex:none;">Timesheet</h1>')
+    +'<span style="flex:1;min-width:0;font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+(mobile?'':'· ')+(a&&b?esc(tsRangeLabel(a,b)):'Set the period')+(c.name?' · '+esc(c.name):'')+'</span>'
+    +(inPeriod?'<button data-act="tsToday" title="Jump to today" style="'+btn+'padding:0 11px;">Today</button>':'')
+    +'<button data-act="tsCfgToggle" title="Period, client and rates" aria-label="Timesheet settings" style="'+btn+'width:32px;'+(view.tsCfgOpen?'border-color:var(--accent-line);background:var(--accent-soft);color:var(--accent);':'')+'">'+icon('sliders',15)+'</button></div>';
+  const cols=mobile?'':'<div style="'+TS_COLS+'flex:none;margin:0 '+pad+';padding:0 13px 7px;font-size:8.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--faint);"><span>Day</span><span style="text-align:center;">Start</span><span style="text-align:center;">End</span><span style="text-align:center;">Travel</span><span style="text-align:center;">Km</span><span style="text-align:right;">Hours</span><span style="text-align:right;">Amount</span></div>';
+  const list=M.weeks.length?M.weeks.map(wk=>tsWeekHTML(wk,c,mobile,today)).join(''):'<div style="padding:50px 20px;text-align:center;color:var(--faint);font-size:12px;line-height:1.7;border:1px solid var(--line);border-radius:var(--r1);">No days in this period.<br/>Set the dates in the settings (sliders icon).</div>';
+  return '<main style="flex:1;min-width:0;display:flex;flex-direction:column;overflow:hidden;">'+title+(view.tsCfgOpen?tsCfgHTML(c,mobile,pad):'')
+    +'<div id="otk-tsstats" style="flex:none;padding:0 '+pad+' 14px;">'+tsStatsHTML(M,mobile)+'</div>'+cols
+    +'<div id="otk-tslist" data-scroll style="flex:1;min-height:0;overflow-y:auto;padding:0 '+pad+' calc(24px + env(safe-area-inset-bottom));">'+list+'</div></main>';}
+/* live totals while typing: only the computed cells change, the inputs (and the caret) stay untouched */
+function tsRefreshCalc(){const M=tsModel(),st=document.getElementById('otk-tsstats');if(st)st.innerHTML=tsStatsHTML(M,isMobile());
+  const set=(k,v)=>{const el=document.querySelector('[data-tsv="'+k+'"]');if(el&&el.textContent!==v)el.textContent=v;};
+  M.weeks.forEach(wk=>{const T=wk.tot;set('ww:'+wk.key,tsDash(T.w,tsFmtHM));set('wt:'+wk.key,tsDash(T.t,tsFmtHM));set('wk:'+wk.key,T.k>0?tsNum(T.k,1)+' km':'–');set('wa:'+wk.key,tsDash(T.amt,tsEUR));
+    wk.days.forEach(dd=>{set('dh:'+dd.id,dd.x.w>0?tsFmtHM(dd.x.w):(dd.x.half?'…':''));set('da:'+dd.id,dd.x.amt>0?tsEUR(dd.x.amt):'');});});}
+function tsScrollToday(){const el=document.querySelector('.otk-tsday[data-day="'+ymd(new Date())+'"]');if(el&&el.scrollIntoView)el.scrollIntoView({block:'center'});}
+/* settings change → full re-render, then the caret goes back to the field the user tabbed into */
+function tsRerender(){setTimeout(()=>{const a=document.activeElement,k=a&&a.classList&&a.classList.contains('otk-tscfg')?a.dataset.k:null;render();if(k){const n=document.querySelector('.otk-tscfg[data-k="'+k+'"]');if(n)n.focus();}},0);}
+
 let syncOpen=false;
 function openSync(){syncOpen=true;render();}
 function closeSync(){syncOpen=false;render();}
@@ -910,6 +1055,7 @@ function applyTheme(){
   const accFit=fitContrast(acc,B.bg,4.5), acc2Fit=fitContrast(acc2,B.bg,4.5);
   const onAcc=bestOn(accFit), onAcc2=bestOn(acc2Fit);
   const rs=document.documentElement.style;
+  rs.colorScheme=relLum(B.bg)>0.5?'light':'dark';   // native date / time pickers follow the theme
   const v={'--accent':accFit,'--accent2':acc2Fit,'--on-accent':onAcc,'--on-accent2':onAcc2,'--accent-soft':rgba(accFit,'.14'),'--accent-dim':rgba(accFit,'.10'),'--accent-line':rgba(accFit,'.5'),'--accent2-soft':rgba(acc2Fit,'.12'),'--accent2-line':rgba(acc2Fit,'.5'),'--bg':B.bg,'--bg2':bg2,'--surface':surface,'--surface2':surface2,'--line':line,'--line-soft':lineSoft,'--line-strong':lineStrong,'--text':text,'--text2':text2,'--dim':dim,'--dim2':dim2,'--faint':faint,'--r1':square?'0px':'10px','--r2':square?'0px':'7px','--r3':square?'0px':'5px','--tt':upper?'uppercase':'none','--ttls':upper?'.03em':'0','--font':FONTS[settings.police]||FONTS['JetBrains Mono']};
   for(const k in v)rs.setProperty(k,v[k]);
   document.body.style.background=B.bg;document.body.style.color=text;document.body.style.fontFamily=v['--font'];
@@ -1092,11 +1238,13 @@ function renderDesktop(){
   const sidebar=view.deskNav?('<aside style="width:210px;flex:none;border-right:1px solid var(--line);background:var(--bg2);display:flex;flex-direction:column;">'
     +'<div style="display:flex;align-items:center;justify-content:space-between;padding:13px 12px 8px;"><span style="font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--faint);">Projects</span><button data-act="addProject" title="New project" style="display:flex;align-items:center;justify-content:center;width:22px;height:22px;border:1px solid var(--line);border-radius:0;background:transparent;color:var(--dim2);cursor:pointer;">'+icon('plus',15)+'</button></div>'
     +'<div style="flex:1;overflow-y:auto;padding:2px 8px;">'+(projRows||'<div style="padding:12px;color:var(--faint);font-size:11px;line-height:1.6;">No projects.<br/>Click ＋.</div>')+'</div>'
+    +'<button data-act="setSection" data-s="timesheet" style="display:flex;align-items:center;gap:9px;padding:11px 13px;width:100%;text-align:left;border:none;border-top:1px solid var(--line-soft);background:'+(view.section==='timesheet'?'var(--accent-dim)':'transparent')+';box-shadow:'+(view.section==='timesheet'?'inset 2px 0 0 var(--accent)':'none')+';color:'+(view.section==='timesheet'?'var(--accent)':'var(--dim)')+';cursor:pointer;font-family:inherit;"><span style="display:flex;">'+icon('stopwatch',16)+'</span><span style="font-size:10px;letter-spacing:.1em;text-transform:uppercase;">Timesheet</span></button>'
     +'<button data-act="openSettings" style="display:flex;align-items:center;gap:9px;padding:11px 13px;width:100%;text-align:left;border:none;border-top:1px solid var(--line-soft);background:transparent;color:var(--dim);cursor:pointer;font-family:inherit;"><span style="display:flex;">'+icon('sliders',16)+'</span><span style="font-size:10px;letter-spacing:.1em;text-transform:uppercase;">Settings</span></button>'
     +'<button data-act="openSync" style="display:flex;align-items:center;gap:9px;padding:11px 13px;width:100%;text-align:left;border:none;border-top:1px solid var(--line-soft);background:transparent;cursor:pointer;font-family:inherit;"><span class="otk-syncdot" style="width:6px;height:6px;border-radius:50%;flex:none;"></span><span class="otk-synclabel" style="font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);">Sync</span></button>'
     +'<div style="padding:8px 13px 10px;display:flex;align-items:center;gap:7px;"><span style="width:6px;height:6px;border-radius:50%;background:var(--accent2);flex:none;"></span><span style="font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint);">Local · offline</span></div></aside>'):'';
   let main;
   if(view.section==='locker'){main=lockerMainHTML(false);}
+  else if(view.section==='timesheet'){main=timesheetHTML(false);}
   else if(!proj){main='<main style="flex:1;display:flex;align-items:center;justify-content:center;text-align:center;padding:40px;"><div style="color:var(--faint);font-size:12.5px;line-height:1.8;">No project.<br/>Open the panel (☰) and hit ＋,<br/>or connect your gist via <b style="color:var(--accent)">Sync</b>.</div></main>';}
   else{const projTasks=store.tasks.filter(t=>t.projectId===proj.id);
     main='<main style="flex:1;min-width:0;display:flex;flex-direction:column;">'
@@ -1136,26 +1284,27 @@ function tileListHTML(){
   return h;
 }
 function renderMobile(){
-  const g=G();const proj=currentProject();const tById=tagMap();const loc=view.section==='locker';
+  const g=G();const proj=currentProject();const tById=tagMap();const loc=view.section==='locker',tsm=view.section==='timesheet',tsk=!loc&&!tsm;
   const spacer='<div style="height:max(8px,env(safe-area-inset-top));flex:none;"></div>';
   // the Tasks | Locker switch sits in the header row itself (no extra height), pinned to the right edge so it never moves
   const header='<header style="flex:none;display:flex;align-items:center;gap:8px;padding:2px 10px 10px;">'
     +'<button data-act="openDrawer" title="Menu" style="display:flex;align-items:center;justify-content:center;width:40px;height:40px;flex:none;border:none;border-radius:var(--r2);background:transparent;color:var(--dim);cursor:pointer;">'+icon('menu',18)+'</button>'
-    +'<span style="color:var(--accent);display:flex;flex:none;">'+icon(loc?'lock':(proj?proj.icon:'sine'),Math.round(18*Math.min(g,1.3)))+'</span>'
-    +'<span style="flex:1;min-width:0;font-size:16px;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-transform:var(--tt);">'+(loc?'Locker':esc(proj?proj.name:'OpenTasks'))+'</span>'
-    +(loc?'':'<button data-act="toggleSearch" title="Search" style="display:flex;align-items:center;justify-content:center;width:38px;height:40px;flex:none;border:none;border-radius:var(--r2);background:transparent;color:var(--dim);cursor:pointer;">'+icon('search',15)+'</button>')
+    +'<span style="color:var(--accent);display:flex;flex:none;">'+icon(loc?'lock':tsm?'stopwatch':(proj?proj.icon:'sine'),Math.round(18*Math.min(g,1.3)))+'</span>'
+    +'<span style="flex:1;min-width:0;font-size:16px;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-transform:var(--tt);">'+(loc?'Locker':tsm?'Timesheet':esc(proj?proj.name:'OpenTasks'))+'</span>'
+    +(!tsk?'':'<button data-act="toggleSearch" title="Search" style="display:flex;align-items:center;justify-content:center;width:38px;height:40px;flex:none;border:none;border-radius:var(--r2);background:transparent;color:var(--dim);cursor:pointer;">'+icon('search',15)+'</button>')
     +sectionToggleHTML(true)+'</header>';
-  const searchRow=(!loc&&view.searchOpen)?'<div style="flex:none;padding:0 12px 10px;"><div style="display:flex;align-items:center;gap:8px;padding:9px 12px;border:1px solid var(--line);border-radius:var(--r2);background:var(--bg2);"><span style="color:var(--faint);display:flex;">'+icon('search',15)+'</span><input id="otk-search" value="'+esc(view.search)+'" placeholder="Search…" style="flex:1;min-width:0;background:transparent;border:none;outline:none;font-family:inherit;font-size:14px;color:var(--text);" /></div></div>':'';
+  const searchRow=(tsk&&view.searchOpen)?'<div style="flex:none;padding:0 12px 10px;"><div style="display:flex;align-items:center;gap:8px;padding:9px 12px;border:1px solid var(--line);border-radius:var(--r2);background:var(--bg2);"><span style="color:var(--faint);display:flex;">'+icon('search',15)+'</span><input id="otk-search" value="'+esc(view.search)+'" placeholder="Search…" style="flex:1;min-width:0;background:transparent;border:none;outline:none;font-family:inherit;font-size:14px;color:var(--text);" /></div></div>':'';
   const projTasks=proj?store.tasks.filter(t=>t.projectId===proj.id):[];
-  const filterRow=(!loc&&proj)?('<div style="flex:none;padding:0 12px 10px;">'+filterButtonHTML(proj)+(view.tagsOpen?'<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:9px;">'+tagBarHTML(proj,projTasks,false)+'</div>':'')+'</div>'):'';
-  const composer=(!loc&&proj)?('<div style="flex:none;padding:0 12px 11px;"><div style="display:flex;align-items:center;gap:8px;padding:8px 9px;border:1px solid var(--line);border-radius:var(--r1);background:var(--surface);"><button data-act="pickerFor" data-kind="composer" title="Task icon" style="display:flex;align-items:center;justify-content:center;width:34px;height:34px;flex:none;border:1px solid var(--line-strong);border-radius:var(--r2);background:var(--bg);color:var(--accent);cursor:pointer;">'+icon(view.composerIcon,20)+'</button><textarea id="otk-composer" rows="1" placeholder="New task…" spellcheck="false" style="flex:1;min-width:0;resize:none;min-height:20px;max-height:110px;background:transparent;border:none;outline:none;font-family:inherit;font-size:14px;line-height:1.5;color:var(--text);"></textarea><button data-act="addTask" style="align-self:stretch;flex:none;padding:0 14px;border:none;border-radius:var(--r2);background:var(--accent);color:var(--on-accent);font-family:inherit;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;cursor:pointer;">Add</button></div></div>'):'';
-  const scroller=loc?lockerMainHTML(true):('<div id="otk-scroll" data-scroll style="flex:1;min-height:0;overflow-y:auto;">'+searchRow+filterRow+composer+'<div id="otk-list" style="padding:4px 0 calc(20px + env(safe-area-inset-bottom));">'+tileListHTML()+'</div></div>');
+  const filterRow=(tsk&&proj)?('<div style="flex:none;padding:0 12px 10px;">'+filterButtonHTML(proj)+(view.tagsOpen?'<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:9px;">'+tagBarHTML(proj,projTasks,false)+'</div>':'')+'</div>'):'';
+  const composer=(tsk&&proj)?('<div style="flex:none;padding:0 12px 11px;"><div style="display:flex;align-items:center;gap:8px;padding:8px 9px;border:1px solid var(--line);border-radius:var(--r1);background:var(--surface);"><button data-act="pickerFor" data-kind="composer" title="Task icon" style="display:flex;align-items:center;justify-content:center;width:34px;height:34px;flex:none;border:1px solid var(--line-strong);border-radius:var(--r2);background:var(--bg);color:var(--accent);cursor:pointer;">'+icon(view.composerIcon,20)+'</button><textarea id="otk-composer" rows="1" placeholder="New task…" spellcheck="false" style="flex:1;min-width:0;resize:none;min-height:20px;max-height:110px;background:transparent;border:none;outline:none;font-family:inherit;font-size:14px;line-height:1.5;color:var(--text);"></textarea><button data-act="addTask" style="align-self:stretch;flex:none;padding:0 14px;border:none;border-radius:var(--r2);background:var(--accent);color:var(--on-accent);font-family:inherit;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;cursor:pointer;">Add</button></div></div>'):'';
+  const scroller=loc?lockerMainHTML(true):tsm?timesheetHTML(true):('<div id="otk-scroll" data-scroll style="flex:1;min-height:0;overflow-y:auto;">'+searchRow+filterRow+composer+'<div id="otk-list" style="padding:4px 0 calc(20px + env(safe-area-inset-bottom));">'+tileListHTML()+'</div></div>');
   let overlays='';
   if(view.drawer){let pr='';store.projects.forEach(p=>{const active=p&&proj&&p.id===proj.id;const cnt=store.tasks.filter(t=>t.projectId===p.id&&!t.done).length;pr+='<div data-act="selectProject" data-id="'+p.id+'" style="display:flex;align-items:center;gap:9px;padding:11px 8px;border-radius:0;cursor:pointer;margin-bottom:2px;'+(active?'background:var(--accent-dim);box-shadow:inset 2px 0 0 var(--accent);':'')+'"><span data-act="pickerFor" data-kind="project" data-id="'+p.id+'" style="display:flex;flex:none;padding:2px;cursor:pointer;color:'+(active?'var(--accent)':'var(--dim2)')+';">'+icon(p.icon,Math.round(15*Math.min(g,1.3)))+'</span><div style="display:flex;flex-direction:column;min-width:0;flex:1;gap:1px;"><span style="font-size:8.5px;letter-spacing:.12em;color:var(--faint);">'+esc(p.code)+'</span><span style="font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;'+(active?'font-weight:600;color:var(--text);':'color:var(--dim);')+'">'+esc(p.name)+'</span></div><span style="font-size:10px;flex:none;color:'+(active?'var(--accent)':'var(--faint)')+';">'+cnt+'</span></div>';});
     overlays+='<div data-act="closeDrawer" style="position:absolute;inset:0;z-index:30;background:rgba(0,0,0,.55);"></div>'
       +'<aside style="position:absolute;top:0;left:0;bottom:0;z-index:31;width:80%;max-width:300px;background:var(--bg2);border-right:1px solid var(--line);display:flex;flex-direction:column;box-shadow:0 0 40px rgba(0,0,0,.5);"><div style="height:max(8px,env(safe-area-inset-top));flex:none;"></div>'
       +'<div style="display:flex;align-items:center;justify-content:space-between;padding:12px 14px 10px;"><span style="font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--faint);">Projects</span><button data-act="addProject" style="display:flex;align-items:center;justify-content:center;width:30px;height:30px;border:1px solid var(--line);border-radius:0;background:transparent;color:var(--dim);cursor:pointer;">'+icon('plus',15)+'</button></div>'
       +'<div style="flex:1;overflow-y:auto;padding:2px 10px;">'+(pr||'<div style="padding:12px;color:var(--faint);font-size:11px;">No projects.</div>')+'</div>'
+      +'<button data-act="setSection" data-s="timesheet" style="display:flex;align-items:center;gap:9px;padding:13px 16px;border:none;border-top:1px solid var(--line-soft);background:'+(tsm?'var(--accent-dim)':'transparent')+';color:'+(tsm?'var(--accent)':'var(--dim)')+';cursor:pointer;font-family:inherit;"><span style="display:flex;">'+icon('stopwatch',16)+'</span><span style="font-size:11px;letter-spacing:.04em;">Timesheet</span></button>'
       +'<button data-act="openSettings" style="display:flex;align-items:center;gap:9px;padding:13px 16px;border:none;border-top:1px solid var(--line-soft);background:transparent;color:var(--dim);cursor:pointer;font-family:inherit;"><span style="display:flex;">'+icon('sliders',16)+'</span><span style="font-size:11px;letter-spacing:.04em;">Settings</span></button>'
       +'<button data-act="openSync" style="display:flex;align-items:center;gap:9px;padding:13px 16px;border:none;border-top:1px solid var(--line-soft);background:transparent;cursor:pointer;"><span class="otk-syncdot" style="width:6px;height:6px;border-radius:50%;flex:none;"></span><span style="font-size:11px;letter-spacing:.04em;color:var(--dim);">Sync — GitHub Gist</span></button>'
       +'<div style="padding:0 16px calc(20px + env(safe-area-inset-bottom));display:flex;align-items:center;gap:7px;"><span class="otk-syncdot" style="width:6px;height:6px;border-radius:50%;flex:none;"></span><span style="font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint);">Local · offline</span></div></aside>';
@@ -1230,6 +1379,18 @@ function attachInputs(scope){
     const fp=document.getElementById('otk-photo');if(fp)fp.addEventListener('change',()=>{lockerUpload([...fp.files]);fp.value='';});
     const dz=document.getElementById('otk-dz');if(dz){dz.addEventListener('dragover',e=>{e.preventDefault();dz.style.borderColor='var(--accent)';});dz.addEventListener('dragleave',()=>{dz.style.borderColor='';});dz.addEventListener('drop',e=>{e.preventDefault();dz.style.borderColor='';if(e.dataTransfer&&e.dataTransfer.files)lockerUpload(e.dataTransfer.files);});}
     const lks=document.getElementById('otk-lksearch');if(lks)lks.addEventListener('input',()=>{view.lkSearch=lks.value;refreshLkList();});
+    // timesheet: every keystroke updates the day, the week and the header; leaving the field tidies the text
+    document.querySelectorAll('.otk-tsin').forEach(el=>{const f=el.dataset.f,id=el.dataset.day,parse=TS_PARSE[f],fmt=TS_FMT[f];
+      el.addEventListener('input',()=>{const v=parse(el.value);tsSetDay(id,f,Number.isNaN(v)?null:v);if(!Number.isNaN(v))el.classList.remove('bad');tsRefreshCalc();});
+      el.addEventListener('change',()=>{const v=parse(el.value);if(Number.isNaN(v))el.classList.add('bad');else{el.classList.remove('bad');el.value=fmt(v);}});
+      el.addEventListener('focus',()=>{try{el.select();}catch(e){}});
+      el.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();const col=[...document.querySelectorAll('.otk-tsin[data-f="'+f+'"]')],nx=col[col.indexOf(el)+1];if(nx){nx.focus();nx.scrollIntoView({block:'nearest'});}else el.blur();}
+        else if(e.key==='Escape')el.blur();});});
+    document.querySelectorAll('.otk-tscfg').forEach(el=>{el.addEventListener('change',()=>{const k=el.dataset.k;let v=el.value;
+      if(k==='name')v=v.trim().slice(0,80);
+      else if(k==='from'||k==='to'){if(!ymdDate(v)){el.style.borderColor='#e0705a';return;}}
+      else{v=tsRate(v);if(Number.isNaN(v)){el.style.borderColor='#e0705a';return;}}
+      tsSetCfg(k,v);tsRerender();});});
     wireLkAudio(document);
   }
 }
@@ -1287,6 +1448,9 @@ document.getElementById('app').addEventListener('click',e=>{
     case 'lkSelClear':lkSelClear();break;
     case 'lkSelDelete':lockerDeleteMany(lkSelIds());break;
     case 'lkSelShare':lockerShareMany(lkSelIds());break;
+    case 'tsToday':tsScrollToday();break;
+    case 'tsCfgToggle':view.tsCfgOpen=!view.tsCfgOpen;render();break;
+    case 'tsToggleTravel':tsSetCfg('billTravel',!tsCfg().billTravel);render();break;
     case 'lkDeleteFolder':lockerDeleteFolder(d.id);break;
     case 'lkCopy':lockerCopy(d.id,el);break;
     case 'lkShare':lockerShare(d.id);break;
@@ -1324,6 +1488,7 @@ document.addEventListener('keydown',e=>{
 
 /* ============================ startup ============================ */
 render();
+if(view.section==='timesheet')tsScrollToday();
 if(cloudOn())cloudPull();
 // service worker = Android share target only (it never caches the app, so updates stay instant)
 if('serviceWorker' in navigator&&location.protocol!=='file:')navigator.serviceWorker.register('sw.js').catch(()=>{});

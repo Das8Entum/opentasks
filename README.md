@@ -24,6 +24,12 @@ I wanted a notepad replacement to jot DSP project ideas, sorted by project and c
 - Fast search, multi-tag filtering, dates, done/undone
 - A 19-glyph waveform icon set for projects, tags and tasks
 
+**Timesheet** (side panel / ☰ menu → Timesheet)
+- Every day of a period (a client or site) with start, end, travel time and kilometres
+- Totals per day, per ISO week and overall, revenue excl. VAT from your hourly and per-km rates, updated as you type
+- Fast entry: `830` → 08:30, travel `45` = minutes or `1:30`, Enter jumps to the next day; travel time billable or not
+- Synced and encrypted with your other data (its own `timesheet.json` in the gist)
+
 **Look & feel**
 - Theme engine: backgrounds × accent colors, 5 monospace fonts, corner radius, Lines/Cards density
 - **PWA**: installable on desktop *and* mobile, runs full-screen (no browser chrome), safe-area aware
@@ -123,6 +129,7 @@ Files are encrypted **in your browser** before upload; the backend only relays c
 - **One IIFE** in `index.html`. State is a plain object; `render()` rebuilds `#app` from `renderDesktop()`/`renderMobile()`; clicks are handled by delegated `data-act` attributes.
 - **Sync**: a 3-way merge, never a blind overwrite. Each device keeps the version it last agreed on with the gist (the *base*); every sync re-reads the gist (conditional `ETag` request, so an unchanged gist costs a 304) and merges each project, tag and task field by field — changed on one side → that side wins, changed on both → the most recent edit wins, deleted on one side and untouched on the other → deleted. Offline edits, expired tokens and two devices editing at once therefore lose nothing. Edits are pushed after a short debounce; auto-pull on load and on a timer (paused while editing). Backward-compatible data migration on load.
 - **Crypto**: Web Crypto only (`crypto.subtle`). Encrypted envelope `{enc, salt, iv, ct}`; the salt travels in the envelope and is adopted on pull.
+- **Timesheet**: a separate `timesheet.json` in the same gist (encrypted with the vault). Each day and the settings carry their last-edit time and the newest edit wins on sync; it travels in the same requests as the tasks.
 - **Locker**: files are chunked (4 MB), each chunk AES-GCM-encrypted (12-byte IV prepended) and `PUT` to the Worker at `/o/<key>`; reassembled and decrypted on open. Near-real-time is a 5 s index poll while the Locker is open. The encrypted index (files, folders, tombstones for deletions) is **merged** on every pull and push — newest edit wins per item — so two devices working at the same time never erase each other's changes.
 - **Share target** (`sw.js`): a minimal service worker that only intercepts the Android share POST, parks the files in IndexedDB and reopens the app to upload them. It caches nothing, so app updates are never stuck behind a stale cache.
 - **Backend** (`backend/locker-worker.js`): a ~100-line Cloudflare Worker that checks a bearer token and streams bytes to/from R2. Nothing else.
